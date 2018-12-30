@@ -1,0 +1,49 @@
+div#left-menu-wrapper{
+	position: absolute;
+	width:9em;
+	height: 100%;
+	float:left;
+	border-right-style: groove;
+}
+
+
+div#left-menu{
+	position: relative;
+	width:7em;
+	border-width: 3px;
+	border-style: groove;
+	border-color: darkgrey;
+	margin:0 auto;
+	border-radius: 5px;
+
+	
+}
+div#left-menu span{
+	padding-top: 2px;
+	padding-bottom: 2px;
+	width:inherit;
+	display:table;
+	background-color: lightgrey;
+	
+
+}
+div#left-menu > span:hover{
+	padding-top: 4px;
+	padding-bottom: 4px;
+	background-color:rgb(201, 197, 200);
+	font-size: 18px;
+	font-family: Georgia;
+}
+div#left-menu span span.arrows{
+	display: inline;
+	position: relative;
+	width:2em;
+	float:right;
+	background-color: transparent;
+	font-weight: bold;
+	color:transparent;
+	bottom: 2px
+}
+div#left-menu span:hover span.arrows{
+	color:grey;
+}

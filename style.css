@@ -1,0 +1,39 @@
+html{
+	height: 100vh;
+}
+body{
+	background-color: #D5D8DC;
+	height: inherit;
+	width: inherit;
+}
+#body{
+	min-height: 100%;
+}
+
+
+div.header{
+	background-color: black;
+	height: 50px;
+	border-bottom-right-radius: 16px;
+	border-bottom-left-radius: 16px; 
+	position: relative;
+	margin: -10px;
+	padding-bottom: 10px;
+	margin-bottom: 10px;
+}
+
+div#main-content{
+	position: absolute;
+	left:15%;
+	width: 80%;
+	height: 80%;
+	background-color: rgba(145,145,145,0);
+	border-style: groove;
+	border-width: 2px;
+	border-color: rgba(108,104,104,0.73);
+	padding: 5px;
+
+}
+ #main-content:after{
+	content: "hello" ;
+}
