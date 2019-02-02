@@ -16,12 +16,15 @@ class Bullet{
 		this.bounces=0;
 	}
 
+	main() {
+		this.handleMovement();
+		this.handleTankCollisions();
+		this.handlePowerupCollisions();
+		this.draw();
+	}
+
 
 	draw(){
-
-	this.handleMovement();
-	this.handleTankCollisions();
-
 
 	ctx.beginPath();
 	ctx.fillStyle = "black";
@@ -35,7 +38,7 @@ class Bullet{
 	}
 
 	handleMovement(){
-
+		//Check if bullet collides with the maze i.e. the walls (first in x then y direction)
 		if(!this.tank.maze.doesRectCollide([this.x-this.radius + this.direction[0],this.y-this.radius, this.radius,this.radius])){
 			this.x+=this.direction[0];
 		}
@@ -55,16 +58,30 @@ class Bullet{
 	}
 
 	handleTankCollisions(){
-		for(var i=0;i<this.tank.maze.tanks.length;i++)
+		this.tank.maze.tanks.forEach(function(tank)
 			{
-			var tank = this.tank.maze.tanks[i];
-			if(tank==this.tank && FRIENDLY_FIRE==false){continue;} 
-			if(doRectsOverlap([tank.x,tank.y,tank.width,tank.height],[this.x-this.radius,this.y-this.radius,this.radius*2,this.radius*2]))
+			if(tank.is_dead==false && (tank!=this.tank || tank.maze.game.friendly_fire==true))
 				{
-					tank.destroy();
+				var bullet_rect=[this.x-this.radius,this.y-this.radius,this.radius*2,this.radius*2];
+				var tank_rect=[tank.x,tank.y,tank.width,tank.height];
+				if(doRectsOverlap(tank_rect,bullet_rect))
+					{
+						tank.onBulletHit();
+					}
 				}
-			}
+			}.bind(this));
 	}
 
-	
+	handlePowerupCollisions(){
+		this.tank.maze.powerups.forEach(function(powerup)
+			{
+				var bullet_rect=[this.x-this.radius,this.y-this.radius,this.radius*2,this.radius*2];
+				var powerup_rect=[powerup.x,powerup.y,powerup.width,powerup.height];
+				if(doRectsOverlap(powerup_rect,bullet_rect))
+						{
+							powerup.onBulletHit(this.tank);
+						}
+			}.bind(this)
+		);
+	}
 }

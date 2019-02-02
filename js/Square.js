@@ -1,7 +1,5 @@
-class Square 
-	{
-	constructor(maze,row,col)
-		{
+class Square{
+	constructor(maze,row,col){
 		this.maze=maze;
 		this.row=row;
 		this.col=col;
@@ -19,24 +17,21 @@ class Square
 		//top left corner
 		this.x=this.col*this.width;
 		this.y=this.row*this.height;
-		}
+	}
 
 
-	draw()
-		{
+	draw(){
 		//local aliases for legibility
 		ctx.fillStyle=this.colour;
 		this.getWalls().forEach(function(e){
 			ctx.fillRect(e[0],e[1],e[2],e[3]);
 		});
-		}
+	}
 
 
-	removeBorder(square)
-		{
+	removeBorder(square){
 
-		if(this.row==square.row)
-			{
+		if(this.row==square.row){
 			if(this.col==square.col-1){
 				this.east=false;
 				square.west=false;
@@ -47,26 +42,21 @@ class Square
 			}
 		}
 
-		if(this.col==square.col)
-			{	
-			if(this.row==square.row-1)	
-				{
+		if(this.col==square.col){	
+			if(this.row==square.row-1){
 				this.south=false;
 				square.north=false;
-				}
-			if(this.row==square.row+1)
-				{
+			}
+			if(this.row==square.row+1){
 				this.north=false;
 				square.south=false;
-				}
-
 			}
 		}
+	}
 
 
 	//Returns neighbouring squares
-	getNeighbours()
-		{	
+	getNeighbours(){	
 		var neighbours=[]
 		if(this.col>0){neighbours.push(this.maze.squares[this.row][this.col-1]);}
 		if(this.col<this.maze.num_of_columns-1){neighbours.push(this.maze.squares[this.row][this.col+1]);}
@@ -74,19 +64,17 @@ class Square
 		if(this.row<this.maze.num_of_rows-1){neighbours.push(this.maze.squares[this.row+1][this.col]);}
 
 		return neighbours;
-		}
+	}
 
 
 	//returns [x,y]
-	getCenter()
-		{
+	getCenter(){
 		return [ (this.col+1/2)*this.width , (this.row+1/2)*this.height ]
-		}
+	}
 
 
 	//returns list of walls (rectangles [x,y,width,height])
-	getWalls()
-		{
+	getWalls(){
 		var w=this.width;
 		var h=this.height;
 		var wt=this.wall_thiccness;
@@ -98,22 +86,20 @@ class Square
 		if(this.south) walls.push([this.x,this.y+h,w+wt,wt]);
 
 		return walls;
-		}
-	
 	}
+	
+}
 
 //Helper Fns
-var shuffle=function(array)
-	{
+var shuffle=function(array){
 
 	var tmp=[];
-	while(array.length>0)
-		{
-			var rnd=Math.floor(Math.random()*array.length);
-			tmp.push(array[rnd]);
-			array.splice(rnd,1);			
-		}
-				return tmp;
+	while(array.length>0){
+		var rnd=Math.floor(Math.random()*array.length);
+		tmp.push(array[rnd]);
+		array.splice(rnd,1);			
 	}
+	return tmp;
+}
 
 
