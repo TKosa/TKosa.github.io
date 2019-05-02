@@ -12,7 +12,9 @@ class Pregame
 		this.settings = new SettingsPanel(this);
 		this.current_panels = [this.start_panel].concat(this.tank_panels);
 			
-		this.colour_templates = ["Lime","cyan","darkorange","Red","Green","#0000FF"];
+		this.colour_templates = ["#63C132","#FFAD69","#54F2F2","#D90429","#04A777","#042A2B","#6D98BA", "#D3B99F", "#1E3888"
+		,"#1282A2","#D90368"];
+		
 		this.controls_templates = [
 		["ArrowUp","ArrowRight","ArrowDown","ArrowLeft","1","2"]
 		,["w","d","s","a","f","g"]
@@ -254,7 +256,7 @@ class TankPanel extends Panel {
 		super(colour);
 	
 		this.pregame=pregame;
-		var delete_button = new Button(this,0,this.height/12,"delete");
+		var delete_button = new Button(this,0,this.height*10/12,"delete");
 		delete_button.onclick = function(){
 			this.pregame.removeTankPanel(this);
 		}.bind(this);

@@ -33,6 +33,8 @@ class Tank{
 		this.leftPressed=false;
 		this.shooting=false;
 
+		//this.img = document.getElementById('tank');
+
 
 		document.addEventListener("keydown", this.keyDownHandler.bind(this), false);
 		document.addEventListener("keyup", this.keyUpHandler.bind(this), false);
@@ -183,7 +185,7 @@ class Tank{
 		this.bullets=[];
 		this.shooting=false;
 
-		this.clearAllPowerups();
+		this.removeAllPowerups();
 	}
 
 	addPowerup(powerup){
