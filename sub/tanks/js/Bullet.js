@@ -54,7 +54,7 @@ class Bullet{
 			this.direction[1]*=-1;
 			this.bounces+=1;
 		}
-		if(this.bounces>=this.tank.bounce_limit){this.tank.bullets.splice(this,1);}
+		if(this.bounces>=this.tank.bounce_limit){this.tank.removeBullet(this);}
 	}
 
 	handleTankCollisions(){
