@@ -32,6 +32,7 @@ class Tank{
 		this.downPressed=false;
 		this.leftPressed=false;
 		this.shooting=false;
+		this.special = function(){};
 
 		//this.img = document.getElementById('tank');
 
@@ -45,9 +46,13 @@ class Tank{
 	main() {
 		if(this.is_dead){return;}
 
-		if(this.shouldFire()){ this.fire(this.rotation, game.bullet_speed); }
+		if(this.shouldFire()){ this.fire(); }
 		this.shooting=false;
 
+		if(this.specialKeyPressed){
+			this.special();
+			this.specialKeyPressed = false;
+		}
 		this.bullets.forEach(function(bullet){bullet.main();})
 
 		this.handleMovement();
@@ -81,8 +86,8 @@ class Tank{
 		else {return false;}
 	}
 
-	fire(rotation,speed){
-		this.fire_helper(rotation,speed);
+	fire(){
+		this.fire_helper(this.rotation, game.bullet_speed);
 	}
 
 	fire_helper(rotation, speed){
@@ -120,17 +125,25 @@ class Tank{
 	
 	//Helper for handleMovement(). Tries to move the tank to x,y. Will fail if maze.doesRectCollide(tank) returns false.
 	tryMovingTo(pos){
-		var x = pos[0];
-		var y = pos[1];
+		
+		//If we are currently in invalid position, move to valid one 
+		if(this.maze.doesRectCollide([this.x,this.y,this.width,this.height])){
+			var curpos = [this.x,this.y];
+			var center = this.maze.getSquareAtXY(curpos).getCenter();
+			this.x = center[0];
+			this.y = center[1];
+			return 
+		}
 
-		if(!this.maze.doesRectCollide([x,y,this.width,this.height])){
-			this.x=x;
-			this.y=y;
+		if(!this.maze.doesRectCollide([pos[0],pos[1],this.width,this.height])){
+			this.x=pos[0];
+			this.y=pos[1];
 		}
 	}
 	
 	keyPressHandler(e){
 		if(e.key == this.controls[4]){this.shooting=true;}
+		if(e.key == this.controls[5]){this.specialKeyPressed=true;}
 	}
 	
 	keyDownHandler(e){
@@ -204,5 +217,9 @@ class Tank{
 		this.powerups.forEach(function(powerup){
 			powerup.tank.removePowerup(powerup);
 		});
+	}
+
+	removeBullet(bullet){
+		removeElementFromArray(bullet,this.bullets);
 	}
 }

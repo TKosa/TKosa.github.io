@@ -8,3 +8,20 @@ var doRectsOverlap = function(rect1,rect2){
 	return true;
 };
 
+function getImageFromURL(url,id){
+	var img = document.getElementById(id);
+	if( img == null){
+		img = document.createElement("img");
+		img.setAttribute('id',name);
+		img.setAttribute('src',url);
+		img.setAttribute('style','display:none');
+		document.body.appendChild(img);
+	}
+	
+	return img;
+}
+
+function removeElementFromArray(element, array){
+	array.splice(array.indexOf(element),1);
+}
+

@@ -29,10 +29,14 @@ class Maze {
 
 		this.randomize();
 		setTimeout(this.addPowerupAndRepeat.bind(this),game.powerup_interval);
+
+		//Functions that are called every tick
+		this.extraFunctionsPerCycle = [];
 	}
 
 	main(){
 		this.tanks.forEach(function(tank){tank.main();});
+		this.extraFunctionsPerCycle.forEach(function(f){f();});
 		this.draw();
 	}
 
@@ -61,6 +65,10 @@ class Maze {
 			var y = canvas.height*4/5+y_padding+15;	
 			
 			ctx.fillText(tank.score.toString(),x,y);
+			if(tank.powerups.length!=0){
+				var powerup = tank.powerups[0];
+				ctx.drawImage(powerup.img, x-powerup.width/2, y+10,powerup.width, powerup.height);
+			}
 		}
 
 		ctx.font = "15px Verdana";
@@ -177,7 +185,7 @@ class Maze {
 		this.powerups=[];
 	}
 
-	//Takes obj with x, y, width and height properties and sets x,y to place it in a valid position
+	//Takes obj with x, y, width and height properties and sets x,y to place it in a random valid position
 	placeObject(object){
 		var square = this.getRandomSquare();
 		var min_x = square.x + square.wall_thiccness * square.west ; 

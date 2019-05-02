@@ -19,7 +19,7 @@ class Game{
 		this.friendly_fire = false;
 		this.bullet_limit =7 ;
 		this.bounce_limit = 7;
-		this.powerup_interval = 5;
+		this.powerup_interval = 10;
 		this.powerup_limit = 7;
 		this.powerup_duration = 10;
 
