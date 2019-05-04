@@ -267,7 +267,10 @@ class InvisibilityPowerup extends Powerup{
 
 			tank.old_draw = tank.draw; 
 			tank.draw = function(){this.bullets.forEach(function(e){e.draw();})}
+<<<<<<< HEAD
 			tank.special = tank.old_draw;
+=======
+>>>>>>> 7e1b078c919657734a38d8148fac84143075e527
 	}
 
 	undo(tank){
