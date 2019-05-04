@@ -267,6 +267,7 @@ class InvisibilityPowerup extends Powerup{
 
 			tank.old_draw = tank.draw; 
 			tank.draw = function(){this.bullets.forEach(function(e){e.draw();})}
+			tank.special = tank.old_draw;
 	}
 
 	undo(tank){
@@ -326,7 +327,7 @@ class ShinraTenseiPowerup extends Powerup{
 
 function generatePowerup(maze){
 
-		powerup_no = Math.floor(8 * Math.random());
+		powerup_no = Math.floor(7 * Math.random());
 		switch(powerup_no){
 			case 0:
 				return new TrippyPowerup(maze);
@@ -344,8 +345,6 @@ function generatePowerup(maze){
 			case 5:
 				return new CannonballPowerup(maze);
 			case 6:
-				return new InvisibilityPowerup(maze);
-			case 7:
 				return new ShinraTenseiPowerup(maze);
 			break;
 		}
