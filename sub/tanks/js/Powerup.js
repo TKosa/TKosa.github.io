@@ -198,8 +198,9 @@ class TeleportPowerup extends Powerup {
 		tank.maze.extraFunctionsPerCycle.push(this.draw_mirror);
 
 		tank.special = function(){
-			this.x = canvas.width-this.x;
-			this.y = canvas.height*4/5-this.y;
+			if(this.lock==true){return;}
+			this.tryMovingTo(canvas.width-this.x,canvas.height*4/5-this.y)
+			this.lock = true;
 			
 		}
 
@@ -267,10 +268,8 @@ class InvisibilityPowerup extends Powerup{
 
 			tank.old_draw = tank.draw; 
 			tank.draw = function(){this.bullets.forEach(function(e){e.draw();})}
-<<<<<<< HEAD
 			tank.special = tank.old_draw;
-=======
->>>>>>> 7e1b078c919657734a38d8148fac84143075e527
+
 	}
 
 	undo(tank){
@@ -302,7 +301,7 @@ class ShinraTenseiPowerup extends Powerup{
 
 
 	undo(tank){
-		this.special = function(){};
+		tank.special = function(){};
 	}
 
 	static repelTank(repeler, repelee){
@@ -317,13 +316,15 @@ class ShinraTenseiPowerup extends Powerup{
 	}
 
 	static repelBullet(tank, bullet){
-		//A tank can't repel itself
 		var adjacent = bullet.x - tank.x;
 		var opposite = tank.y - bullet.y;
 		var hypoteneuse = Math.sqrt(adjacent**2 + opposite **2);
 		var strength_of_push = 0.5;
-		bullet.direction[0]+=adjacent/hypoteneuse * strength_of_push;
-		bullet.direction[1]-=opposite/hypoteneuse * strength_of_push;
+		var new_x_speed = bullet.direction[0] + adjacent/hypoteneuse * strength_of_push;
+		var new_y_speed = bullet.direction[1] - opposite/hypoteneuse * strength_of_push;
+		if( (new_x_speed**2 + new_y_speed**2)> (game.bullet_speed_limit_squared) ){return;}
+		bullet.direction[0]=new_x_speed;
+		bullet.direction[1]=new_y_speed;
 	}
 }
 

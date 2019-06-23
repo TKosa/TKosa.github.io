@@ -39,7 +39,7 @@ class Tank{
 
 		document.addEventListener("keydown", this.keyDownHandler.bind(this), false);
 		document.addEventListener("keyup", this.keyUpHandler.bind(this), false);
-		document.addEventListener("keypress",this.keyPressHandler.bind(this),false);
+		
 
 	}
 
@@ -51,7 +51,6 @@ class Tank{
 
 		if(this.specialKeyPressed){
 			this.special();
-			this.specialKeyPressed = false;
 		}
 		this.bullets.forEach(function(bullet){bullet.main();})
 
@@ -139,12 +138,23 @@ class Tank{
 			this.x=pos[0];
 			this.y=pos[1];
 		}
+
+		//If the position isn't valid try only moving in the x-component. If fail try y-component.
+		else{
+
+			if(!this.maze.doesRectCollide([pos[0],this.y,this.width,this.height])){
+			this.x=pos[0];
+			return;
+			}
+
+			if(!this.maze.doesRectCollide([this.x,pos[1],this.width,this.height])){
+			this.y=pos[1];
+			return;
+			}
+				
+		}
 	}
-	
-	keyPressHandler(e){
-		if(e.key == this.controls[4]){this.shooting=true;}
-		if(e.key == this.controls[5]){this.specialKeyPressed=true;}
-	}
+
 	
 	keyDownHandler(e){
 
@@ -152,6 +162,8 @@ class Tank{
 		if(e.key == this.controls[1]){this.rightPressed=true;}
 		if(e.key == this.controls[2]){this.downPressed=true;}
 		if(e.key == this.controls[3]){this.leftPressed=true;}
+		if(e.key == this.controls[4]){this.shooting=true;}
+		if(e.key == this.controls[5]){this.specialKeyPressed=true;}
 	}
 	
 	keyUpHandler(e){
@@ -160,6 +172,12 @@ class Tank{
 		if(e.key == this.controls[1]){this.rightPressed=false;}
 		if(e.key == this.controls[2]){this.downPressed=false;}
 		if(e.key == this.controls[3]){this.leftPressed=false;}
+		if(e.key == this.controls[4]){this.shooting=false;}
+		if(e.key == this.controls[5]){
+			this.specialKeyPressed=false;
+			//For single click powerups where holding the powerup key down would be problematic, using it locks it, and releasing the key unlocks it.
+			if(this.powerup!=undefined){this.powerup.lock=false;}
+		}
 
 	}
 	

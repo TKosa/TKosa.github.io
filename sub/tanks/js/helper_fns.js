@@ -10,6 +10,8 @@ var doRectsOverlap = function(rect1,rect2){
 
 function getImageFromURL(url,id){
 	var img = document.getElementById(id);
+
+	//If image isn't saved locally, try getting it by url. This is basically an excuse to have the url somewhere in the code, giving credit to img authors.
 	if( img == null){
 		img = document.createElement("img");
 		img.setAttribute('id',name);
