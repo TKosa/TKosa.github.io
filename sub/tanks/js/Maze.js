@@ -84,9 +84,13 @@ class Maze {
 	}
 
 	randomize(){
-		this.squares.forEach(function(element){
-			element.forEach(function(e){
-				e.visited=false;
+		this.squares.forEach(function(row){
+			row.forEach(function(square){
+				square.visited=false;
+				square.north=true;
+				square.south=true;
+				square.east=true;
+				square.west=true;
 			});
 		});
 
@@ -177,6 +181,7 @@ class Maze {
 	}
 
 	restart(){
+		this.randomize();
 		this.message="restart";
 		this.num_of_destroyed_tanks=0;
 		for(var i=0;i<this.tanks.length;i++){
