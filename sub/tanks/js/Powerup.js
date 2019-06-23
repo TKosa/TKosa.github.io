@@ -198,9 +198,18 @@ class TeleportPowerup extends Powerup {
 		tank.maze.extraFunctionsPerCycle.push(this.draw_mirror);
 
 		tank.special = function(){
-			if(this.lock==true){return;}
-			this.tryMovingTo(canvas.width-this.x,canvas.height*4/5-this.y)
-			this.lock = true;
+			if(this.poweruplock==true){return;}
+			/*TrymovingTo is designed a bit awkwardly for this. If the position is invalid, it will try to move in just the horizontal and just the vertical components.
+			This is to let tanks to slide up slowly against a wall theyre driving into at an upwards angle, instead of stopping completely. 
+			For teleport, if the position is invalid it tries to only teleport its x-component, which contradicts the marker of where you will be teleported.
+			My solution is to move the tank to a potentially invalid position, then call tryMovingTo, which centers it in the square if its currently in an invalid position.
+			It looks hacky, but its bug-free and unnoticeable during gameplay.
+			*/
+			this.x = canvas.width-this.x;
+			this.y = canvas.height*4/5-this.y;
+			this.tryMovingTo([this.x,this.y]);
+
+			this.poweruplock = true;
 			
 		}
 
@@ -221,6 +230,15 @@ class CannonballPowerup extends Powerup{
 		this.color = "grey";
 		var url = "https://image.flaticon.com/icons/svg/1642/1642658.svg";
 		this.img = getImageFromURL(url,this.name);	
+	}
+
+	//Override of Bullethit. Removed timer. Cannonball lasts until you use it or replace it.
+	onBulletHit(tank){
+		
+		this.maze.removePowerup(this);
+		this.tank=tank;
+		tank.removeAllPowerups();
+		tank.addPowerup(this);
 	}
 
 	effect(tank){
@@ -332,6 +350,7 @@ class ShinraTenseiPowerup extends Powerup{
 function generatePowerup(maze){
 
 		powerup_no = Math.floor(7 * Math.random());
+		powerup_no = 4;
 		switch(powerup_no){
 			case 0:
 				return new TrippyPowerup(maze);

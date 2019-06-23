@@ -176,7 +176,7 @@ class Tank{
 		if(e.key == this.controls[5]){
 			this.specialKeyPressed=false;
 			//For single click powerups where holding the powerup key down would be problematic, using it locks it, and releasing the key unlocks it.
-			if(this.powerup!=undefined){this.powerup.lock=false;}
+			this.poweruplock=false;
 		}
 
 	}
