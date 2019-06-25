@@ -350,7 +350,6 @@ class ShinraTenseiPowerup extends Powerup{
 function generatePowerup(maze){
 
 		powerup_no = Math.floor(7 * Math.random());
-		powerup_no = 4;
 		switch(powerup_no){
 			case 0:
 				return new TrippyPowerup(maze);
@@ -371,6 +370,6 @@ function generatePowerup(maze){
 				return new ShinraTenseiPowerup(maze);
 			break;
 		}
-}
+} 
 
 		

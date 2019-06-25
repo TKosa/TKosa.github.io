@@ -22,7 +22,7 @@ class Game{
 		this.bounce_limit = 7;
 		this.powerup_interval = 10;
 		this.powerup_limit = 7;
-		this.powerup_duration = 999;
+		this.powerup_duration = 10;
 
 		this.pregame=new Pregame(this,canvas.height*3/4);
 		this.main_object=this.pregame;
