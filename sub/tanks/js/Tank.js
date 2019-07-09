@@ -103,29 +103,34 @@ class Tank{
 	
 	//Called every iteration of draw. Checks to see if buttons are pressed and moves tank accordingly.
 	handleMovement(){
-		var x=this.x;
-		var y=this.y;
-		var ms=this.move_speed;
+		if(this.upPressed){this.onUpPress();}
+		if(this.rightPressed){this.onRightPress();}
+		if(this.downPressed){this.onDownPress();}
+		if(this.leftPressed){this.onLeftPress();}
+	}
 
+	onUpPress(){
 		//Attempts to move in x and y directions seperately. This means if tank is driving into wall at an angle, it will move parrallel to wall.
-		if(this.upPressed)
-			{
-			this.tryMovingTo([this.x+this.move_speed*Math.sin(this.rotation),this.y]);
-			this.tryMovingTo([this.x,this.y-this.move_speed*Math.cos(this.rotation)]);
-			}
-		if(this.rightPressed){this.rotation+=this.rotation_speed;}
-		if(this.downPressed)
-			{
-			this.tryMovingTo([this.x-this.move_speed*Math.sin(this.rotation),this.y]);
-			this.tryMovingTo([this.x,this.y+this.move_speed*Math.cos(this.rotation)]);
-			}
-		if(this.leftPressed){this.rotation-=this.rotation_speed;}
+		this.tryMovingTo([this.x+this.move_speed*Math.sin(this.rotation),this.y]);
+		this.tryMovingTo([this.x,this.y-this.move_speed*Math.cos(this.rotation)]);
 	}
 	
-	//Helper for handleMovement(). Tries to move the tank to x,y. Will fail if maze.doesRectCollide(tank) returns false.
+	onRightPress(){this.rotation+=this.rotation_speed;}
+	
+	onDownPress(){
+		this.tryMovingTo([this.x-this.move_speed*Math.sin(this.rotation),this.y]);
+		this.tryMovingTo([this.x,this.y+this.move_speed*Math.cos(this.rotation)]);
+	}
+
+	onLeftPress(){this.rotation-=this.rotation_speed;}
+
+
+	
+	//Helper for handleMovement(). Tries to move the tank to x,y. Places in middle of room if position is invalid before moving.
+	//Used by teleport powerups.
 	tryMovingTo(pos){
 		
-		//If we are currently in invalid position, move to valid one 
+		//If we are currently in invalid position (before trying to move), move to valid one 
 		if(this.maze.doesRectCollide([this.x,this.y,this.width,this.height])){
 			var curpos = [this.x,this.y];
 			var center = this.maze.getSquareAtXY(curpos).getCenter();

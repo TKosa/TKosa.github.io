@@ -246,7 +246,13 @@ class CannonballPowerup extends Powerup{
 		tank.special = function(){
 			this.fire();
 			var cannonball = this.bullets[this.bullets.length-1];
-			cannonball.radius=20;
+			
+			cannonball.radius=50;
+			
+			var speedMultipler=2;
+			cannonball.direction[0]*=speedMultipler;
+			cannonball.direction[1]*=speedMultipler;
+
 			cannonball.handleMovement = function(){
 				this.x+=this.direction[0];
 				this.y+=this.direction[1];
@@ -346,6 +352,32 @@ class ShinraTenseiPowerup extends Powerup{
 	}
 }
 
+class HexPowerup extends Powerup{
+	//Multiple hexes will cancel out (if there's an even number). They don't interfere with each other. Each swaps left/right.
+	
+	constructor(maze,x,y){
+		super(maze,x,y);
+		this.name = "Hex";
+		this.color = "purple";
+		var url = "https://image.flaticon.com/icons/svg/204/204574.svg";
+		this.img = getImageFromURL(url,this.name);
+		
+	}
+
+	effect(tank){
+		tank.maze.tanks.forEach(function(tank){
+			[tank.onLeftPress, tank.onRightPress] = [tank.onRightPress, tank.onLeftPress];
+			[tank.onUpPress, tank.onDownPress] = [tank.onDownPress, tank.onUpPress];	
+		})
+	}
+
+
+	undo(tank){
+		this.effect(tank);
+	}
+
+}
+
 
 function generatePowerup(maze){
 
@@ -368,6 +400,8 @@ function generatePowerup(maze){
 				return new CannonballPowerup(maze);
 			case 6:
 				return new ShinraTenseiPowerup(maze);
+			case 7:
+				return new HexPowerup(maze);
 			break;
 		}
 } 

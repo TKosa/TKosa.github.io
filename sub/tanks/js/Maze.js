@@ -28,7 +28,7 @@ class Maze {
 		this.squares=squares;
 
 		this.randomize();
-		setTimeout(this.addPowerupAndRepeat.bind(this),game.powerup_interval);
+		setTimeout(this.tryAddPowerupAndRepeat.bind(this),game.powerup_interval);
 
 		//Functions that are called every tick
 		this.extraFunctionsPerCycle = [];
@@ -47,6 +47,7 @@ class Maze {
 		this.squares.forEach(function(row){row.forEach(function(square){square.draw();});});
 		this.tanks.forEach(function(tank){if(!tank.is_dead) tank.draw();});
 		this.powerups.forEach(function(powerup){powerup.draw();});
+
 
 		//Draw bottom panel
 		var x_padding = 5;
@@ -70,6 +71,7 @@ class Maze {
 				ctx.drawImage(powerup.img, x-powerup.width/2, y+10,powerup.width, powerup.height);
 			}
 		}
+
 
 		ctx.font = "15px Verdana";
 		ctx.fillStyle = "black";
@@ -203,17 +205,20 @@ class Maze {
 	
 	}
 
-	addPowerupAndRepeat(){	
-		if(this.powerups.length >= this.game.powerup_limit){
-			this.powerups.shift();
+	//Will fail if length if full. Will not eject oldest powerup.
+	tryAddPowerupAndRepeat(){
+		if(this.powerups.length != this.game.powerup_limit){
+			if(this.powerups.length >= this.game.powerup_limit){
+				this.powerups.shift();
+			}	
+
+			var powerup = generatePowerup(this);
+			this.placeObject(powerup);
+			this.addPowerup(powerup);
+			this.message = powerup.getMessage();
 		}	
 
-		var powerup = generatePowerup(this);
-		this.placeObject(powerup);
-		this.addPowerup(powerup);
-		this.message = powerup.getMessage();	
-
-		setTimeout(this.addPowerupAndRepeat.bind(this), this.game.powerup_interval*1000, this);
+		setTimeout(this.tryAddPowerupAndRepeat.bind(this), this.game.powerup_interval*1000, this);
 	}
 
 	addPowerup(powerup){
