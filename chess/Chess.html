@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Game Test</title>
+  <link rel="stylesheet" href="chess.css">
+  <link rel="stylesheet" href="chat.css">
+  <!-- Add PeerJS library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+</head>
+
+<body>
+  <div id="game-container">
+    <div id="main">
+      <div id="chessboard"></div>
+      <div id="status"></div> 
+      <div id="timer-controls">
+        <div id="timers">
+          <span id="white-timer"></span>
+          <span id="black-timer"></span>
+        </div>
+        <div id="game-controls">
+          <input type="text" id="start-time" placeholder="Start time (min)" title="Enter start time in minutes">
+          <input type="text" id="increment" placeholder="Increment (sec)" title="Enter increment in seconds">
+          <button id="start-button">Start</button>
+          <button id="prev-move">&lt;</button>
+          <button id="next-move">&gt;</button>
+        </div>
+      </div>
+      <div id="controls"></div>
+    </div>
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="chat-input">
+        <input type="text" id="message-input" placeholder="Type your message...">
+        <button id="send-button">Send</button>
+      </div>
+      <!-- Add Host and Join buttons -->
+      <button id="host-button">Host Room</button>
+      <button id="join-button">Join Room</button>
+
+      <!-- Add Modal for joining rooms -->
+      <div id="join-modal" class="modal" role="dialog" aria-labelledby="join-modal-title" aria-modal="true">
+        <div class="modal-content">
+          <span class="close" id="close-modal" aria-label="Close">&times;</span>
+          <h2 id="join-modal-title">Join a Room</h2>
+          <input type="text" id="join-nickname" placeholder="Enter your nickname..." aria-label="Nickname">
+          <input type="text" id="join-room-name" placeholder="Enter Host Peer ID..." aria-label="Room ID">
+          <button id="confirm-join">Join</button>
+          <!-- Error message div -->
+          <div id="join-error-message"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="EventHub.js"></script>
+  <script type="module" src="PeerManager.js"></script>
+  <script type="module" src="TestUI.js"></script> 
+  <script type="module" src="chess.js"></script>
+  <script type="module" src="chessUI.js"></script>
+  <script type="module" src="chat.js"></script>
+</body>
+
+</html>

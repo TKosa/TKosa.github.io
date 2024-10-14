@@ -1,0 +1,126 @@
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f0f0;
+  margin: 0;
+  padding: 0;
+}
+
+#game-container {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+#main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#chessboard {
+  display: grid;
+  grid-template-columns: repeat(8, 60px);
+  grid-template-rows: repeat(8, 60px);
+  border: 2px solid #333;
+}
+
+.cell {
+  width: 60px;
+  height: 60px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 36px;
+  cursor: pointer;
+}
+
+.white {
+  background-color: #eee;
+}
+
+.black {
+  background-color: #769656;
+}
+
+.selected {
+  box-shadow: inset 0 0 0 3px red;
+}
+
+#status {
+  margin-top: 20px;
+  font-size: 20px;
+  text-align: center;
+} 
+
+#controls {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 10px;
+}
+
+#timer-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+#timers {
+  display: flex;
+  flex-direction: row;
+  gap: 5px;
+}
+
+#game-controls {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+#white-timer,
+#black-timer {
+  font-size: 1.2em;
+  font-weight: bold;
+  padding: 5px 10px;
+  border-radius: 5px;
+  width: 80px;
+  text-align: center;
+  min-height: 1.2em;
+  line-height: 1.2em;
+}
+
+#white-timer {
+  background-color: white;
+  color: black;
+  border: 1px solid black;
+}
+
+#black-timer {
+  background-color: black;
+  color: white;
+}
+
+#start-time,
+#increment {
+  width: 80px;
+  padding: 5px;
+  font-size: 0.9em;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  min-height: 1.2em;
+  line-height: 1.2em;
+}
+
+#start-button,
+#prev-move,
+#next-move {
+  padding: 5px 10px;
+  font-size: 1em;
+}
