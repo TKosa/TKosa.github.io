@@ -1,7 +1,10 @@
-import { reset } from "./chessUI.js";
 import { tests, games } from "./Tests.js";
+import { eventHub } from "./EventHub.js";
 
 let selectedItem = null;
+const reset = () => {
+  eventHub.emit("resetButtonClicked");
+};
 
 function populateDropdown(dropdown, items, defaultText) {
   dropdown.innerHTML = ''; // Clear existing options

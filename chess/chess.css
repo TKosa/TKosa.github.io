@@ -64,42 +64,44 @@ body {
   gap: 10px;
 }
 
-#timer-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  width: 100%;
+#back-button, #forward-button {
+  padding: 5px 10px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
 }
 
-#timers {
-  display: flex;
-  flex-direction: row;
-  gap: 5px;
+#back-button:hover, #forward-button:hover {
+  background-color: #45a049;
 }
 
 #game-controls {
   display: flex;
-  gap: 5px;
   align-items: center;
+  gap: 20px;
+  margin-bottom: 20px;
 }
 
-#white-timer,
-#black-timer {
-  font-size: 1.2em;
+#timers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timer {
+  font-family: 'Courier New', monospace;
+  font-size: 24px;
   font-weight: bold;
   padding: 5px 10px;
   border-radius: 5px;
-  width: 80px;
-  text-align: center;
-  min-height: 1.2em;
-  line-height: 1.2em;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
 }
 
 #white-timer {
   background-color: white;
   color: black;
-  border: 1px solid black;
 }
 
 #black-timer {
@@ -107,20 +109,24 @@ body {
   color: white;
 }
 
-#start-time,
-#increment {
-  width: 80px;
-  padding: 5px;
-  font-size: 0.9em;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  min-height: 1.2em;
-  line-height: 1.2em;
+#game-inputs {
+  display: flex;
+  gap: 10px;
 }
 
-#start-button,
-#prev-move,
-#next-move {
+#start-time, #increment {
+  width: 150px;
+}
+
+#start-button {
   padding: 5px 10px;
-  font-size: 1em;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#start-button:hover {
+  background-color: #45a049;
 }

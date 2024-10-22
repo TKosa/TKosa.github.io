@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nicknames[conn] = data.nickname;
         break;
       default:
-        console.warn('Unknown message type:', data.type);
+        return;
     }
   }
 

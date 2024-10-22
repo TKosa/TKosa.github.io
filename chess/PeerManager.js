@@ -40,6 +40,7 @@ export class PeerManager {
 
   // Assumes peer is already open
   connect(peerId) {
+    // If peer is not initialized, initialize it and try to connect again
     if (!(this.peer)) {
       let peer = this.initializePeer();
       peer.on("open", () => {
@@ -53,7 +54,16 @@ export class PeerManager {
      conn.on("close", () => {
        this.connections = this.connections.filter((c) => c !== conn);
      });
-     conn.on("error", console.error);
+    conn.on("error", console.error);
+    conn.on("data", (data) => {
+      if (data.type === "start-game") {
+        eventHub.emit("start-game", data);
+      }
+
+      if (data.type === "reset-by-host") {
+        eventHub.emit("reset-by-host");
+      }
+    });
     return conn;
   }
 

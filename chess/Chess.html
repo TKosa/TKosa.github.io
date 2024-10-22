@@ -14,22 +14,24 @@
 <body>
   <div id="game-container">
     <div id="main">
-      <div id="chessboard"></div>
-      <div id="status"></div> 
-      <div id="timer-controls">
+      <!-- New div for game controls -->
+      <div id="game-controls">
         <div id="timers">
-          <span id="white-timer"></span>
-          <span id="black-timer"></span>
+          <div id="white-timer" class="timer">00:00</div>
+          <div id="black-timer" class="timer">00:00</div>
         </div>
-        <div id="game-controls">
-          <input type="text" id="start-time" placeholder="Start time (min)" title="Enter start time in minutes">
-          <input type="text" id="increment" placeholder="Increment (sec)" title="Enter increment in seconds">
-          <button id="start-button">Start</button>
-          <button id="prev-move">&lt;</button>
-          <button id="next-move">&gt;</button>
+        <div id="game-inputs">
+          <input type="number" id="start-time" placeholder="Start time (minutes)" min="1">
+          <input type="number" id="increment" placeholder="Increment (seconds)" min="0">
+          <button id="start-button">Start Game</button>
         </div>
       </div>
-      <div id="controls"></div>
+      <div id="chessboard"></div>
+      <div id="status"></div>
+      <div id="controls">
+        <button id="back-button">Back</button>
+        <button id="forward-button">Forward</button>
+      </div>
     </div>
     <div id="chat-container">
       <div id="chat-messages"></div>
@@ -57,9 +59,8 @@
   </div>
   <script type="module" src="EventHub.js"></script>
   <script type="module" src="PeerManager.js"></script>
+  <script type="module" src="Game.js"></script>
   <script type="module" src="TestUI.js"></script> 
-  <script type="module" src="chess.js"></script>
-  <script type="module" src="chessUI.js"></script>
   <script type="module" src="chat.js"></script>
 </body>
 

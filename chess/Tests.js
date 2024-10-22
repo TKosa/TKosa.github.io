@@ -48,33 +48,13 @@ export class Test {
 }
 
 export const tests = [
-  new Test("All Pieces Move", "Every type of piece moves at least twice", [
-    [7, 1, 5, 2, true], // White knight to c3
-    [0, 1, 2, 2, true], // Black knight to c6
-    [6, 3, 5, 3], // White pawn to d3
-    [1, 3, 2, 3], // Black pawn to d6
-    [7, 2, 6, 3], // White bishop to b2
-    [0, 2, 1, 3], // Black bishop to b6
-    [7, 3, 5, 5], // White queen to d3
-    [0, 3, 2, 5], // Black queen to d6
-    [7, 4, 7, 3], // White king to e2
-    [0, 4, 0, 3], // Black king to e7
-    [7, 0, 7, 2], // White rook to c1
-    [0, 0, 0, 2], // Black rook to c8
-    [6, 4, 4, 4], // White pawn to e4
-    [1, 4, 3, 4], // Black pawn to e5
-    [7, 5, 4, 2], // White bishop to c4
-    [0, 5, 3, 2], // Black bishop to c5
-    [5, 2, 3, 3], // White knight to d5
-    [2, 2, 4, 3], // Black knight to d5
-    [5, 5, 3, 3], // White queen captures knight
-    [2, 5, 4, 3], // Black queen captures queen
-    [4, 2, 3, 2], // White bishop captures queen
-    [3, 2, 4, 3], // Black bishop captures bishop
-    [7, 2, 5, 2], // White rook to c3
-    [0, 2, 2, 2], // Black rook to c6
-    [6, 0, 5, 0], // White pawn to a3
-    [1, 7, 2, 7], // Black pawn to h6
+  new Test("Can't end in check", "", [
+    [6, 4, 4, 4],
+    [1, 4, 3, 4],
+    [7, 5, 5, 3],
+    [0, 3, 4, 7],
+    [6, 5, 4, 5, false], // Can't expose king to check
+    
   ]),
   new Test(
     "Test Castling",
