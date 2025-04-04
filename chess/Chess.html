@@ -9,40 +9,58 @@
   <link rel="stylesheet" href="chat.css">
   <!-- Add PeerJS library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+
+  <script type="module" src="EventHub.js"></script>
+  <script type="module" src="PeerManager.js"></script>
+  <script type="module" src="Game.js"></script>
+  <script type="module" src="TestUI.js"></script>
+  
 </head>
 
 <body>
-  <div id="game-container">
-    <div id="main">
-      <!-- New div for game controls -->
-      <div id="game-controls">
-        <div id="timers">
-          <div id="white-timer" class="timer">00:00</div>
-          <div id="black-timer" class="timer">00:00</div>
+  <div class="app-container">
+    <div class="connection-panel">
+      <div class="key-section">
+        <h2>Connection</h2>
+        <div class="input-group">
+          <input type="text" id="connection-key" placeholder="Enter a shared key">
+          <input type="text" id="nickname-field" placeholder="Nickname (Optional)">
+          <button id="connect-btn">Connect</button>
         </div>
-        <div id="game-inputs">
-          <input type="number" id="start-time" placeholder="Start time (minutes)" min="1">
-          <input type="number" id="increment" placeholder="Increment (seconds)" min="0">
-          <button id="start-button">Start Game</button>
-        </div>
-      </div>
-      <div id="chessboard"></div>
-      <div id="status"></div>
-      <div id="controls">
-        <button id="back-button">Back</button>
-        <button id="forward-button">Forward</button>
+        <div id="connection-status">Disconnected from signaling server</div>
       </div>
     </div>
-    <div id="chat-container">
-      <div id="chat-messages"></div>
-      <div id="chat-input">
-        <input type="text" id="message-input" placeholder="Type your message...">
-        <button id="send-button">Send</button>
+    <div id="game-container">
+      <div id="game">
+        <!-- New div for game controls -->
+        <div id="game-controls">
+          <div id="timers">
+            <div id="white-timer" class="timer">00:00</div>
+            <div id="black-timer" class="timer">00:00</div>
+          </div>
+          <div id="game-inputs">
+            <input type="number" id="start-time" placeholder="Start time (minutes)" min="1">
+            <input type="number" id="increment" placeholder="Increment (seconds)" min="0">
+            <button id="start-button">Start Game</button>
+          </div>
+        </div>
+        <div id="chessboard"></div>
+        <div id="status"></div>
+        <div id="controls">
+          <button id="back-button">Back</button>
+          <button id="forward-button">Forward</button>
+        </div>
       </div>
-      <!-- Add Host and Join buttons -->
-      <button id="host-button">Host Room</button>
-      <button id="join-button">Join Room</button>
-
+      <div id="chat-container">
+        <div id="chat-messages"></div>
+        <div id="chat-input">
+          <input type="text" id="message-input" placeholder="Type your message...">
+          <button id="send-button">Send</button>
+        </div>
+      </div>
+    </div>
+   
+    
       <!-- Add Modal for joining rooms -->
       <div id="join-modal" class="modal" role="dialog" aria-labelledby="join-modal-title" aria-modal="true">
         <div class="modal-content">
@@ -57,11 +75,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="EventHub.js"></script>
-  <script type="module" src="PeerManager.js"></script>
-  <script type="module" src="Game.js"></script>
-  <script type="module" src="TestUI.js"></script> 
-  <script type="module" src="chat.js"></script>
 </body>
 
 </html>

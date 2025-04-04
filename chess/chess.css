@@ -1,7 +1,4 @@
 body {
-  display: flex;
-  justify-content: center;
-  align-items: center;
   height: 100vh;
   background-color: #f0f0f0;
   margin: 0;
@@ -11,8 +8,21 @@ body {
 #game-container {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 20px;
+  align-items: stretch;
+  gap: 20px; 
+  /* height: 100%; */ /* Uncomment if you want the game container to take full height */
+}
+
+@media (max-width: 768px) {
+  .game-container {
+    flex-direction: column;
+  }
+}
+
+#game {
+  background-color: white;
+  border-radius: 15px;
+  padding: 25px;
 }
 
 #main {
@@ -24,8 +34,9 @@ body {
 #chessboard {
   display: grid;
   grid-template-columns: repeat(8, 60px);
-  grid-template-rows: repeat(8, 60px);
   border: 2px solid #333;
+  margin: auto;
+  width: fit-content;
 }
 
 .cell {
@@ -130,3 +141,55 @@ body {
 #start-button:hover {
   background-color: #45a049;
 }
+
+/* Connection panel */
+.connection-panel {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 768px) {
+  .connection-panel {
+    width: fit-content;
+  }
+}
+
+.input-group {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.input-group input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px 0 0 4px;
+  font-size: 16px;
+}
+
+.input-group button {
+  padding: 10px 15px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.input-group button:hover {
+  background-color: #2980b9;
+}
+
+#connection-status {
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.app-container {
+  padding: 20px;
+}
+

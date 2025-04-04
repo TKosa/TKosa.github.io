@@ -262,48 +262,45 @@ export class Game {
     this.renderBoard();
     this.startTimers();
     this.updateStatus(); // Update status after starting the game
-
+    
     if (peerManager.connections.length > 0) {
       this.isNetworkedGame = true;
-
-      if (peerManager.connections.length > 0) {
-        // Add listeners only if they haven't been added before
-        peerManager.connections.forEach((conn) => {
-          if (isHost) {
-            // Send start event to other players
-            conn.send({
-              type: "start-game",
-              startTime: this.startTimeInput.value,
-              increment: this.incrementInput.value,
-            });
-          }
-					if (!this.networkListenersAdded) {
-            // Listen for moves from other players
-            conn.on("data", (data) => {
-              if (data.type === "chess-move") {
-                this.handleRemoteMove(data.move);
-                this.afterMove();
-              }
-            });
-					}
-        });
-
-        // If it's the networked game, listen for local event from makeLocalMove and broadcast it over the network
-        this.broadcastMove = (move) => {
-          peerManager.broadcast({
-            type: "chess-move",
-            move,
+      
+      // Add listeners only if they haven't been added before
+      peerManager.connections.forEach((conn) => {
+        if (isHost) {
+          // Send start event to other players
+          conn.send({
+            type: "start-game",
+            startTime: this.startTimeInput.value,
+            increment: this.incrementInput.value,
           });
-				};
-				if (!this.networkListenersAdded) {
-					eventHub.on("my-move", this.broadcastMove);
-				}
+        }
+        if (!this.networkListenersAdded) {
+          // Listen for moves from other players
+          conn.on("data", (data) => {
+            if (data.type === "chess-move") {
+              this.handleRemoteMove(data.move);
+              this.afterMove();
+            }
+          });
+        }
+      });
 
-        this.networkListenersAdded = true; // Mark listeners as added
+      // If it's the networked game, listen for local event from makeLocalMove and broadcast it over the network
+      this.broadcastMove = (move) => {
+        peerManager.broadcast({
+          type: "chess-move",
+          move,
+        });
+      };
+      if (!this.networkListenersAdded) {
+        eventHub.on("my-move", this.broadcastMove);
       }
-    } else {
-      // Start local game
+
+      this.networkListenersAdded = true; // Mark listeners as added
     }
+    
   }
 
   formatTime(milliseconds) {
