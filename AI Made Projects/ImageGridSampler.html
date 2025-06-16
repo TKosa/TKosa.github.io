@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Grid Sampler — Zoomable</title>
+  <style>
+    body {font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f9fafb; color: #374151; margin: 0; padding: 2rem;}
+    .main-container {max-width: 56rem; margin-inline: auto; display: flex; flex-direction: column; gap: 1.5rem;}
+    h1 {font-size: 1.5rem; font-weight: 600; text-align: center; color: #1d4ed8; margin-bottom: 1.5rem;}
+    .card {background: #fff; border: 1px solid #e5e7eb; border-radius: .5rem; padding: 1rem;}
+    .controls {display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; position: sticky; top: 0; background: #fff; z-index: 10;}
+    .control-group {display: flex; flex-direction: column;}
+    label {font-size: .875rem; font-weight: 500; margin-bottom: .25rem;}
+    input[type="number"], input[type="file"], input[type="range"] {font-size: .875rem;}
+    input[type="number"] {border: 1px solid #d1d5db; border-radius: .25rem; padding: .5rem; width: 7rem;}
+    input[type="range"] {width: 10rem;}
+    button {color: #fff; padding: .5rem 1rem; border: none; border-radius: .25rem; cursor: pointer; transition: background-color .2s;}
+    button:disabled {opacity: .5; cursor: not-allowed;}
+    #print-btn {background: #16a34a;} #print-btn:hover:not(:disabled) {background: #15803d;}
+    #download-btn {background: #9333ea;} #download-btn:hover:not(:disabled) {background: #7e22ce;}
+    .content-container {display: flex; flex-direction: column; gap: 1rem;}
+    #workspace {position: relative; background: transparent; border: none; overflow: visible;}
+    #zoom-wrapper {position: relative; transform-origin: top left; width: max-content; height: max-content;}
+    #workspace-img {display: block; width: 100%; height: auto;}
+    #lines-container {position: absolute; inset: 0; pointer-events: none;}
+    .line-handle {position: absolute; z-index: 20; user-select: none; pointer-events: auto;}
+    .line-handle.horizontal {left: 0; width: 100%; height: 8px; cursor: row-resize; transform: translateY(-50%);}  
+    .line-handle.vertical {top: 0; height: 100%; width: 8px; cursor: col-resize; transform: translateX(-50%);}  
+    .line-visual {background: rgba(239,68,68,.8); box-shadow: 0 0 3px #000;}
+    .line-handle.horizontal .line-visual {width: 100%; height: 1px; margin-top: 3.5px;}
+    .line-handle.vertical .line-visual {height: 100%; width: 1px; margin-left: 3.5px;}
+    #result-card {transition: none;} #result-card.fixed-preview {position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 100;}
+    #result-card h2 {font-size: 1.125rem; font-weight: 500; margin-bottom: .5rem;}
+    #result-img {border: 1px solid #d1d5db; image-rendering: pixelated; display: block; max-width: 100%; height: auto;}
+    .hidden {display: none !important;}
+    .help-toggle-button {position: absolute; top: .75rem; right: .75rem; background: #bfdbfe; border: none; border-radius: 50%; width: 2.5rem; height: 2.5rem; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: #1e3a8a; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,.1);}  
+    .help-menu {position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #fff; padding: 1.5rem; border: 1px solid #d1d5db; border-radius: .5rem; box-shadow: 0 10px 15px rgba(0,0,0,.1); max-width: 90%; max-height: 90%; overflow: auto; z-index: 40;}
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <h1>Image Grid Sampler</h1>
+    <div class="controls card">
+      <div class="control-group"><label for="image-upload">Upload Image</label><input type="file" id="image-upload" accept="image/*"></div>
+      <div class="control-group"><label for="h-count">Horizontal Lines</label><input type="number" id="h-count" min="1" value="3"></div>
+      <div class="control-group"><label for="v-count">Vertical Lines</label><input type="number" id="v-count" min="1" value="3"></div>
+      <div class="control-group"><label for="zoom-slider">Zoom</label><input type="range" id="zoom-slider" min="0.25" max="8" step="0.1" value="1"></div>
+      <div class="control-group"><label><input type="checkbox" id="grid-toggle" checked> Show Grid</label></div>
+      <div class="control-group">
+        <label for="pixel-size">Pixel Size</label>
+        <input type="number" id="pixel-size" min="1" value="10">
+      </div>
+      <span id="zoom-display">100%</span>
+      <button id="print-btn" disabled>Print</button><button id="download-btn" disabled>Download</button><button class="help-toggle-button" id="help-toggle">?</button>
+    </div>
+
+    <div class="content-container">
+      <div id="workspace"><div id="zoom-wrapper"><img id="workspace-img" class="hidden" alt="Uploaded"><div id="lines-container"></div></div></div>
+      <div id="result-card" class="card hidden"><h2>Result Image</h2><img id="result-img" alt="Result"></div>
+    </div>
+  </div>
+
+  <div class="help-menu hidden" id="help-menu">
+    <h2>Help</h2>
+    <p>Instructions:</p>
+    <ul>
+      <li>Upload an image using the "Upload Image" button.</li><li>Adjust the number of horizontal and vertical lines.</li><li>Click "Print" to generate the sampled image.</li><li>Click "Download" to save the result.</li><li>Use the zoom slider or mouse wheel to zoom.</li><li>Lines can be dragged.</li><li>Hold Shift while dragging to move all subsequent lines.</li><li>Hold Ctrl to drag the whole grid.</li><li>Press Tab to toggle grid visibility.</li><li>Hold Alt to bring the print preview to the center of the screen.</li>
+    </ul>
+    <p>Click the "?" button again to close this menu.</p>
+  </div>
+
+  <script>
+    const imageUpload=document.getElementById('image-upload'),hCountInput=document.getElementById('h-count'),vCountInput=document.getElementById('v-count'),zoomSlider=document.getElementById('zoom-slider'),zoomDisplay=document.getElementById('zoom-display'),printBtn=document.getElementById('print-btn'),downloadBtn=document.getElementById('download-btn'),workspace=document.getElementById('workspace'),zoomWrapper=document.getElementById('zoom-wrapper'),workspaceImg=document.getElementById('workspace-img'),linesContainer=document.getElementById('lines-container'),resultCard=document.getElementById('result-card'),resultImg=document.getElementById('result-img'),gridToggle=document.getElementById('grid-toggle'),helpToggle=document.getElementById('help-toggle'),helpMenu=document.getElementById('help-menu');
+
+    workspace.style.overflow='auto';
+    let imageSrc=null,resultSrc=null,zoom=1;let CELL_SIZE=10;
+    //Update CELL_SIZE based on pixel-size input
+    const pixelSizeInput=document.getElementById('pixel-size');
+    pixelSizeInput.addEventListener('input',e=>{CELL_SIZE=parseInt(e.target.value,10);if(isNaN(CELL_SIZE)||CELL_SIZE<1)CELL_SIZE=10;generateLines();});
+
+    const naturalDims=()=>({width:workspaceImg.naturalWidth,height:workspaceImg.naturalHeight});
+
+    function applyZoom(z){zoom=z;zoomWrapper.style.transform=`scale(${zoom})`;const d=naturalDims();workspace.style.height=`${d.height*zoom}px`;workspace.style.width=`${d.width*zoom}px`;zoomDisplay.textContent=`${Math.round(zoom*100)}%`;}
+
+    zoomSlider.addEventListener('input',e=>applyZoom(parseFloat(e.target.value)));
+
+    workspace.addEventListener('wheel',e=>{e.preventDefault();const rect=workspace.getBoundingClientRect();const preX=(e.clientX-rect.left+workspace.scrollLeft)/zoom;const preY=(e.clientY-rect.top+workspace.scrollTop)/zoom;const step=.1;const nz=Math.min(24,Math.max(.25,zoom+(-e.deltaY>0?step:-step)));if(nz===zoom)return;zoomSlider.value=nz;applyZoom(nz);workspace.scrollLeft=preX*nz-(e.clientX-rect.left);workspace.scrollTop=preY*nz-(e.clientY-rect.top);},{passive:false});
+
+    imageUpload.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{imageSrc=ev.target.result;workspaceImg.src=imageSrc;workspaceImg.classList.remove('hidden');linesContainer.innerHTML='';resultCard.classList.add('hidden');printBtn.disabled=true;downloadBtn.disabled=true;};r.readAsDataURL(f);});
+
+    workspaceImg.addEventListener('load',()=>{applyZoom(1);generateLines();});
+
+    // If user clicks P, press print button 
+    document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='p'){e.preventDefault();printBtn.click();}});
+
+    function updateGridVisibility(){linesContainer.style.display=gridToggle.checked?'block':'none';}
+    gridToggle.addEventListener('change',updateGridVisibility);
+
+    function generateLines(ori='both'){
+      if(!imageSrc)return;const d=naturalDims();
+      if(ori==='h'||ori==='both'){const hc=parseInt(hCountInput.value,10);linesContainer.querySelectorAll('.horizontal').forEach(el=>el.remove());const hGap=d.height/(hc+1);for(let i=0;i<hc;i++)createLine('h',Math.round(hGap*(i+1)));}
+      if(ori==='v'||ori==='both'){const vc=parseInt(vCountInput.value,10);linesContainer.querySelectorAll('.vertical').forEach(el=>el.remove());const vGap=d.width/(vc+1);for(let i=0;i<vc;i++)createLine('v',Math.round(vGap*(i+1)));}
+      printBtn.disabled=false;updateGridVisibility();
+    }
+
+    hCountInput.addEventListener('input',()=>generateLines('h'));
+    vCountInput.addEventListener('input',()=>generateLines('v'));
+
+    function createLine(ori,pos){const handle=document.createElement('div');const visual=document.createElement('div');handle.className=`line-handle ${ori==='h'?'horizontal':'vertical'}`;visual.className='line-visual';handle.appendChild(visual);if(ori==='h')handle.style.top=`${pos}px`;else handle.style.left=`${pos}px`;linesContainer.appendChild(handle);makeDraggable(handle,ori);}
+
+    function makeDraggable(handle,ori){handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();handle.setPointerCapture(e.pointerId);const rect=workspace.getBoundingClientRect();const startCoord=ori==='h'?(e.clientY-rect.top)/zoom:(e.clientX-rect.left)/zoom;const groupDrag=e.shiftKey;let elems;if(groupDrag){const all=Array.from(linesContainer.querySelectorAll(ori==='h'?'.horizontal':'.vertical'));const startPos=parseFloat(ori==='h'?handle.style.top:handle.style.left)||0;elems=all.filter(el=>{const pos=parseFloat(ori==='h'?el.style.top:el.style.left)||0;return pos>=startPos;});elems.sort((a,b)=>{const pa=parseFloat(ori==='h'?a.style.top:a.style.left)||0;const pb=parseFloat(ori==='h'?b.style.top:b.style.left)||0;return pa-pb;});}else{elems=[handle];}
+      const initPos=elems.map(el=>parseFloat(ori==='h'?el.style.top:el.style.left)||0);
+      const move=mv=>{const currCoord=ori==='h'?(mv.clientY-rect.top)/zoom:(mv.clientX-rect.left)/zoom;const delta=currCoord-startCoord;const limit=ori==='h'?workspaceImg.naturalHeight:workspaceImg.naturalWidth;elems.forEach((el,i)=>{let newPos=initPos[i]+delta;newPos=Math.max(0,Math.min(limit,newPos));if(ori==='h')el.style.top=`${newPos}px`;else el.style.left=`${newPos}px`;});};
+      const up=uv=>{handle.releasePointerCapture(uv.pointerId);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);};
+      document.addEventListener('pointermove',move);document.addEventListener('pointerup',up);});}
+
+    let panData=null;workspace.addEventListener('pointerdown',e=>{if(!(e.button===0&&e.ctrlKey))return;if(!imageSrc)return;e.preventDefault();workspace.setPointerCapture(e.pointerId);const vElems=Array.from(linesContainer.querySelectorAll('.vertical'));const hElems=Array.from(linesContainer.querySelectorAll('.horizontal'));panData={startX:e.clientX,startY:e.clientY,vElems,hElems,vInit:vElems.map(el=>parseFloat(el.style.left)||0),hInit:hElems.map(el=>parseFloat(el.style.top)||0)};const move=mv=>{if(!panData)return;const dx=(mv.clientX-panData.startX)/zoom;const dy=(mv.clientY-panData.startY)/zoom;const imgW=workspaceImg.naturalWidth;const imgH=workspaceImg.naturalHeight;panData.vElems.forEach((el,i)=>{let newLeft=panData.vInit[i]+dx;newLeft=Math.max(0,Math.min(imgW,newLeft));el.style.left=`${newLeft}px`;});panData.hElems.forEach((el,i)=>{let newTop=panData.hInit[i]+dy;newTop=Math.max(0,Math.min(imgH,newTop));el.style.top=`${newTop}px`;});};const up=uv=>{workspace.releasePointerCapture(uv.pointerId);panData=null;document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);};document.addEventListener('pointermove',move);document.addEventListener('pointerup',up);});
+
+    printBtn.addEventListener('click',()=>{if(!imageSrc)return;const hLines=Array.from(linesContainer.querySelectorAll('.horizontal')).map(el=>parseFloat(el.style.top)).sort((a,b)=>a-b);const vLines=Array.from(linesContainer.querySelectorAll('.vertical')).map(el=>parseFloat(el.style.left)).sort((a,b)=>a-b);const t=document.createElement('canvas');t.width=workspaceImg.naturalWidth;t.height=workspaceImg.naturalHeight;const tctx=t.getContext('2d');tctx.drawImage(workspaceImg,0,0);const o=document.createElement('canvas');o.width=vLines.length*CELL_SIZE;o.height=hLines.length*CELL_SIZE;const octx=o.getContext('2d');vLines.forEach((vx,vi)=>{hLines.forEach((hy,hi)=>{const x=Math.min(Math.round(vx),workspaceImg.naturalWidth-1);const y=Math.min(Math.round(hy),workspaceImg.naturalHeight-1);const[d0,d1,d2,d3]=tctx.getImageData(x,y,1,1).data;octx.fillStyle=`rgba(${d0},${d1},${d2},${d3/255})`;octx.fillRect(vi*CELL_SIZE,hi*CELL_SIZE,CELL_SIZE,CELL_SIZE);});});resultSrc=o.toDataURL('image/png');resultImg.src=resultSrc;resultCard.classList.remove('hidden');downloadBtn.disabled=false;});
+
+    downloadBtn.addEventListener('click',()=>{if(!resultSrc)return;const a=document.createElement('a');a.href=resultSrc;a.download='grid-sample.png';a.click();});
+
+    zoomSlider.addEventListener('wheel',e=>{e.preventDefault();const step=parseFloat(zoomSlider.step)||.1;const nv=Math.min(parseFloat(zoomSlider.max),Math.max(parseFloat(zoomSlider.min),parseFloat(zoomSlider.value)+(e.deltaY<0?step:-step)));zoomSlider.value=nv;applyZoom(nv);},{passive:false});
+
+    document.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();gridToggle.checked=!gridToggle.checked;updateGridVisibility();}if(e.key==='Alt'){if(!resultCard.classList.contains('hidden'))resultCard.classList.add('fixed-preview');}});
+    document.addEventListener('keyup',e=>{if(e.key==='Alt'){e.preventDefault();if(resultCard.classList.contains('fixed-preview'))resultCard.classList.remove('fixed-preview');}});
+
+    helpToggle.addEventListener('click',()=>{helpMenu.classList.toggle('hidden');});
+  </script>
+</body>
+</html>
