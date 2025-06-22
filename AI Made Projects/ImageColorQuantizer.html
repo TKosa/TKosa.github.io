@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Image Color Quantizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .custom-file-button input[type="file"] {
+            display: none;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #4f46e5;
+            /* indigo-600 */
+            cursor: pointer;
+            border-radius: 50%;
+            transition: background .2s;
+        }
+
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #4f46e5;
+            /* indigo-600 */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 0;
+        }
+
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background: #9ca3af;
+            /* gray-400 */
+        }
+
+        input[type=range]:disabled::-moz-range-thumb {
+            background: #9ca3af;
+            /* gray-400 */
+        }
+
+        .palette-swatch {
+            width: 100%;
+            padding-top: 100%;
+            /* 1:1 Aspect Ratio */
+            position: relative;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .palette-swatch span {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-align: center;
+            background-color: rgba(255, 255, 255, 0.8);
+            color: #1f2937;
+            transition: opacity 0.2s;
+        }
+
+        #analysisTableContainer {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Styles for Custom Color Picker */
+        #customColorPicker {
+            position: absolute;
+            /* Using top/left with JS for positioning */
+            z-index: 1000;
+            /* Ensure it's on top of other content */
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-5xl bg-white rounded-xl shadow-lg p-6 md:p-8">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Advanced Color Quantizer</h1>
+            <p class="text-gray-600 mt-2">Reduce colors, view palettes, and measure image quality with PSNR.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 items-end">
+            <div class="flex flex-col">
+                <label for="imageUpload" class="mb-2 font-semibold text-gray-700">1. Upload Image</label>
+                <div class="custom-file-button">
+                    <label for="imageUpload"
+                        class="w-full inline-flex items-center justify-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg cursor-pointer hover:bg-gray-300 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        <span id="fileName">Choose a PNG file...</span>
+                    </label>
+                    <input id="imageUpload" type="file" accept="image/png">
+                </div>
+            </div>
+            <div class="flex flex-col">
+                <label for="colorSlider" class="mb-2 font-semibold text-gray-700">2. Number of Colors</label>
+                <div class="flex items-center space-x-4">
+                    <input id="colorSlider" type="range" min="2" max="256" value="16"
+                        class="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer" disabled>
+                    <span id="sliderValue"
+                        class="font-semibold text-gray-700 w-16 text-center bg-gray-100 rounded-md py-1">16</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="text-center my-4 text-lg text-gray-600 h-6"></div>
+
+        <div id="resultContainer" class="grid grid-cols-1 md:grid-cols-2 gap-8 hidden">
+            <div>
+                <h2 class="text-xl font-semibold text-center mb-4">Original Image</h2>
+                <canvas id="originalCanvas" class="w-full h-auto rounded-lg shadow-md border border-gray-200"></canvas>
+            </div>
+            <div>
+                <h2 class="text-xl font-semibold text-center mb-4">Quantized Image</h2>
+                <canvas id="quantizedCanvas" class="w-full h-auto rounded-lg shadow-md border border-gray-200"></canvas>
+            </div>
+        </div>
+
+        <div id="analysisContainer" class="mt-8 hidden">
+            <h3 class="text-xl font-semibold mb-2">Analysis</h3>
+            <div class="mb-6 border-b border-gray-200 pb-6">
+                <button id="runFullAnalysisBtn"
+                    class="bg-teal-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    disabled>Run Full Analysis</button>
+                <p class="text-sm text-gray-500 mt-2">Click to calculate the image quality (PSNR) for every color count
+                    from 2 up to the current slider value. Results will appear in a table below.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <h4 class="font-semibold mb-2 text-gray-800">Current Quality</h4>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <div class="flex justify-between items-center">
+                            <span class="font-medium text-gray-700">PSNR (Quality):</span>
+                            <span id="psnrValue" class="font-bold text-lg text-indigo-600">N/A</span>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">Peak Signal-to-Noise Ratio. Higher is better. &infin;
+                            indicates a perfect match.</p>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="font-semibold text-gray-800">Generated Palette</h4>
+                        <button id="exportPaletteBtn"
+                            class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            disabled>Export</button>
+                    </div>
+                    <div id="paletteContainer"
+                        class="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-2 bg-gray-50 p-4 rounded-lg">
+                    </div>
+                    <input type="color" id="nativeColorPicker" class="hidden">
+                </div>
+            </div>
+        </div>
+
+        <div id="fullAnalysisResults" class="mt-8 hidden">
+            <h3 class="text-xl font-semibold mb-4">Full Analysis Results</h3>
+            <div id="analysisTableContainer" class="w-full bg-gray-50 p-4 rounded-lg border">
+                <table class="w-full text-left table-auto">
+                    <thead>
+                        <tr class="border-b-2 border-gray-200">
+                            <th class="px-4 py-2">Color Count</th>
+                            <th class="px-4 py-2">PSNR (dB)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="analysisTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="customColorPicker" class="hidden bg-white shadow-xl p-4 rounded-lg z-10 border border-gray-200"
+        style="min-width: 250px;">
+        <div class="flex mb-4 border-b">
+            <button id="rgbTabBtn"
+                class="px-3 py-2 text-sm font-medium text-indigo-700 border-b-2 border-indigo-500 focus:outline-none">RGB</button>
+            <button id="hslTabBtn"
+                class="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent focus:outline-none">HSL</button>
+        </div>
+
+        <div id="rgbPanel">
+            <div class="mb-2">
+                <label for="rgbR" class="block text-xs font-medium text-gray-700">Red:</label>
+                <input type="range" id="rgbR" min="0" max="255" value="0"
+                    class="w-full h-1 bg-red-200 rounded-lg appearance-none cursor-pointer">
+                <span id="rgbRValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div class="mb-2">
+                <label for="rgbG" class="block text-xs font-medium text-gray-700">Green:</label>
+                <input type="range" id="rgbG" min="0" max="255" value="0"
+                    class="w-full h-1 bg-green-200 rounded-lg appearance-none cursor-pointer">
+                <span id="rgbGValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div class="mb-2">
+                <label for="rgbB" class="block text-xs font-medium text-gray-700">Blue:</label>
+                <input type="range" id="rgbB" min="0" max="255" value="0"
+                    class="w-full h-1 bg-blue-200 rounded-lg appearance-none cursor-pointer">
+                <span id="rgbBValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div id="rgbCurrentColorDisplay" class="w-full h-8 mt-4 rounded-lg border border-gray-200"></div>
+        </div>
+
+        <div id="hslPanel" class="hidden">
+            <div class="mb-2">
+                <label for="hslH" class="block text-xs font-medium text-gray-700">Hue:</label>
+                <input type="range" id="hslH" min="0" max="360" value="0"
+                    class="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    style="background: linear-gradient(to right, red, yellow, lime, cyan, blue, magenta, red);">
+                <span id="hslHValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div class="mb-2">
+                <label for="hslS" class="block text-xs font-medium text-gray-700">Saturation:</label>
+                <input type="range" id="hslS" min="0" max="100" value="0"
+                    class="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    style="background: linear-gradient(to right, gray, #ff0000);">
+                <span id="hslSValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div class="mb-2">
+                <label for="hslL" class="block text-xs font-medium text-gray-700">Lightness:</label>
+                <input type="range" id="hslL" min="0" max="100" value="0"
+                    class="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    style="background: linear-gradient(to right, black, gray, white);">
+                <span id="hslLValue" class="text-xs text-gray-600">0</span>
+            </div>
+            <div id="hslCurrentColorDisplay" class="w-full h-8 mt-4 rounded-lg border border-gray-200"></div>
+        </div>
+
+        <div class="flex justify-between gap-2 mt-4">
+            <button id="confirmColorBtn"
+                class="flex-1 bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105">Confirm</button>
+            <button id="cancelColorBtn"
+                class="flex-1 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-transform transform hover:scale-105">Cancel</button>
+        </div>
+    </div>
+
+
+    <script>
+        // --- DOM Element References ---
+        const imageUpload = document.getElementById('imageUpload');
+        const colorSlider = document.getElementById('colorSlider');
+        const sliderValueEl = document.getElementById('sliderValue');
+        const originalCanvas = document.getElementById('originalCanvas');
+        const quantizedCanvas = document.getElementById('quantizedCanvas');
+        const statusEl = document.getElementById('status');
+        const resultContainer = document.getElementById('resultContainer');
+        const fileNameEl = document.getElementById('fileName');
+        const analysisContainer = document.getElementById('analysisContainer');
+        const psnrValueEl = document.getElementById('psnrValue');
+        const paletteContainer = document.getElementById('paletteContainer');
+        const exportPaletteBtn = document.getElementById('exportPaletteBtn');
+        const runFullAnalysisBtn = document.getElementById('runFullAnalysisBtn');
+        const fullAnalysisResults = document.getElementById('fullAnalysisResults');
+        const analysisTableBody = document.getElementById('analysisTableBody');
+        // const nativeColorPicker = document.getElementById('nativeColorPicker'); // No longer directly used
+
+        const originalCtx = originalCanvas.getContext('2d');
+        const quantizedCtx = quantizedCanvas.getContext('2d');
+        let originalImageData = null;
+        let currentPalette = [];
+        let debounceTimer;
+
+        // Store the current state of the quantized image data for color replacement
+        let currentQuantizedImageData = null;
+        let activeSwatchOldColor = null; // To store the color (RGB array) of the swatch being edited
+        let currentEditedSwatch = null; // Reference to the actual DOM swatch element
+
+        // --- Custom Color Picker DOM Elements ---
+        const customColorPicker = document.getElementById('customColorPicker');
+        const rgbTabBtn = document.getElementById('rgbTabBtn');
+        const hslTabBtn = document.getElementById('hslTabBtn');
+        const rgbPanel = document.getElementById('rgbPanel');
+        const hslPanel = document.getElementById('hslPanel');
+        const confirmColorBtn = document.getElementById('confirmColorBtn');
+        const cancelColorBtn = document.getElementById('cancelColorBtn');
+
+        // RGB Sliders and Value Displays
+        const rgbR = document.getElementById('rgbR');
+        const rgbG = document.getElementById('rgbG');
+        const rgbB = document.getElementById('rgbB');
+        const rgbRValue = document.getElementById('rgbRValue');
+        const rgbGValue = document.getElementById('rgbGValue');
+        const rgbBValue = document.getElementById('rgbBValue');
+        const rgbCurrentColorDisplay = document.getElementById('rgbCurrentColorDisplay');
+
+        // HSL Sliders and Value Displays
+        const hslH = document.getElementById('hslH');
+        const hslS = document.getElementById('hslS');
+        const hslL = document.getElementById('hslL');
+        const hslHValue = document.getElementById('hslHValue');
+        const hslSValue = document.getElementById('hslSValue');
+        const hslLValue = document.getElementById('hslLValue');
+        const hslCurrentColorDisplay = document.getElementById('hslCurrentColorDisplay');
+
+
+        // --- Event Listeners ---
+        imageUpload.addEventListener('change', handleImageUpload);
+        colorSlider.addEventListener('input', handleSliderChange);
+        exportPaletteBtn.addEventListener('click', handleExportPalette);
+        runFullAnalysisBtn.addEventListener('click', runFullAnalysis);
+
+        // Custom Color Picker Event Listeners
+        rgbTabBtn.addEventListener('click', () => switchColorPickerTab('rgb'));
+        hslTabBtn.addEventListener('click', () => switchColorPickerTab('hsl'));
+
+        rgbR.addEventListener('input', updateRgbSlidersAndImage);
+        rgbG.addEventListener('input', updateRgbSlidersAndImage);
+        rgbB.addEventListener('input', updateRgbSlidersAndImage);
+
+        hslH.addEventListener('input', updateHslSlidersAndImage);
+        hslS.addEventListener('input', updateHslSlidersAndImage);
+        hslL.addEventListener('input', updateHslSlidersAndImage);
+
+        confirmColorBtn.addEventListener('click', finalizeColorChange);
+        cancelColorBtn.addEventListener('click', cancelColorChange);
+
+        const debouncedQuantize = debounce(startQuantization, 250);
+
+        function debounce(func, delay) {
+            return function (...args) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        function handleSliderChange() {
+            sliderValueEl.textContent = colorSlider.value;
+            if (originalImageData) {
+                updateStatus(`Waiting to process for ${colorSlider.value} colors...`);
+                debouncedQuantize();
+            }
+        }
+
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file || file.type !== 'image/png') {
+                updateStatus('Please select a PNG file.', true); return;
+            }
+            fileNameEl.textContent = file.name.length > 20 ? `${file.name.substring(0, 17)}...` : file.name;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    originalCanvas.width = img.width;
+                    originalCanvas.height = img.height;
+                    quantizedCanvas.width = img.width;
+                    quantizedCanvas.height = img.height;
+                    originalCtx.drawImage(img, 0, 0);
+                    originalImageData = originalCtx.getImageData(0, 0, img.width, img.height);
+
+                    resultContainer.classList.remove('hidden');
+                    analysisContainer.classList.remove('hidden');
+                    fullAnalysisResults.classList.add('hidden'); // Hide old results
+                    colorSlider.disabled = false;
+                    exportPaletteBtn.disabled = false;
+                    runFullAnalysisBtn.disabled = false;
+                    updateStatus('Image loaded. Move slider to change colors.');
+                    startQuantization();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function updateStatus(message, isError = false) {
+            statusEl.textContent = message;
+            statusEl.style.color = isError ? '#dc2626' : '#4b5563';
+        }
+
+        function startQuantization() {
+            if (!originalImageData) return;
+            const k = parseInt(colorSlider.value, 10);
+            updateStatus(`Processing for ${k} colors...`);
+
+            setTimeout(() => {
+                try {
+                    const { quantizedData, palette } = quantize(originalImageData, k);
+
+                    // Create a *deep copy* of the ImageData.data array
+                    currentQuantizedImageData = new ImageData(
+                        new Uint8ClampedArray(quantizedData.data),
+                        quantizedData.width,
+                        quantizedData.height
+                    );
+                    quantizedCtx.putImageData(currentQuantizedImageData, 0, 0); // Display it
+                    const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
+                    psnrValueEl.textContent = `${psnr.toFixed(2)} dB`;
+                    currentPalette = palette; // Update the current palette based on new quantization
+                    displayPalette(palette);
+                    updateStatus(`Image quantized to ${k} colors.`);
+                } catch (error) {
+                    console.error("Quantization error:", error);
+                    updateStatus('An error occurred during quantization.', true);
+                }
+            }, 10);
+        }
+
+        // --- Core Quantization Logic (Unchanged) ---
+        function quantize(imageData, k) {
+            const pixels = getPixels(imageData);
+            if (pixels.length === 0) return { quantizedData: new ImageData(imageData.width, imageData.height), palette: [] };
+            const initialBucket = [pixels];
+            const buckets = splitBuckets(initialBucket, k);
+            const palette = buckets.filter(b => b.length > 0).map(getAverageColor);
+            const quantizedData = mapPixelsToPalette(imageData, palette);
+            return { quantizedData, palette };
+        }
+        function getPixels(imageData) {
+            const pixels = []; const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) { if (data[i + 3] > 128) pixels.push([data[i], data[i + 1], data[i + 2]]); }
+            return pixels;
+        }
+        function splitBuckets(buckets, k) {
+            while (buckets.length < k) {
+                let bucketToSplit = -1, maxRange = -1;
+                for (let i = 0; i < buckets.length; i++) {
+                    if (buckets[i].length > 1) {
+                        const { range } = findGreatestRangeChannel(buckets[i]);
+                        if (range > maxRange) { maxRange = range; bucketToSplit = i; }
+                    }
+                }
+                if (bucketToSplit === -1) break;
+                const bucket = buckets[bucketToSplit]; const { channelIndex } = findGreatestRangeChannel(bucket);
+                bucket.sort((a, b) => a[channelIndex] - b[channelIndex]);
+                const medianIndex = Math.floor(bucket.length / 2);
+                buckets.splice(bucketToSplit, 1, bucket.slice(0, medianIndex), bucket.slice(medianIndex));
+            }
+            return buckets;
+        }
+        function findGreatestRangeChannel(bucket) {
+            let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
+            for (const p of bucket) { minR = Math.min(minR, p[0]); maxR = Math.max(maxR, p[0]); minG = Math.min(minG, p[1]); maxG = Math.max(maxG, p[1]); minB = Math.min(minB, p[2]); maxB = Math.max(maxB, p[2]); }
+            const rR = maxR - minR, gR = maxG - minG, bR = maxB - minB;
+            if (rR >= gR && rR >= bR) return { channelIndex: 0, range: rR };
+            if (gR >= rR && gR >= bR) return { channelIndex: 1, range: gR };
+            return { channelIndex: 2, range: bR };
+        }
+        function getAverageColor(bucket) {
+            let r = 0, g = 0, b = 0; for (const p of bucket) { r += p[0]; g += p[1]; b += p[2]; }
+            return [Math.round(r / bucket.length), Math.round(g / bucket.length), Math.round(b / bucket.length)];
+        }
+        function mapPixelsToPalette(original, palette) {
+            const newImageData = new ImageData(original.width, original.height); if (palette.length === 0) return newImageData;
+            const d1 = original.data, d2 = newImageData.data, memo = {};
+            for (let i = 0; i < d1.length; i += 4) {
+                const a = d1[i + 3]; if (a < 128) { d2[i + 3] = a; continue; }
+                const r = d1[i], g = d1[i + 1], b = d1[i + 2]; const key = `${r}|${g}|${b}`;
+                let nC = memo[key]; if (!nC) { nC = findClosestColor([r, g, b], palette); memo[key] = nC; }
+                d2[i] = nC[0]; d2[i + 1] = nC[1]; d2[i + 2] = nC[2]; d2[i + 3] = a;
+            } return newImageData;
+        }
+        function findClosestColor(color, palette) {
+            let mDS = Infinity, cC = palette[0];
+            for (const pC of palette) { const dS = (color[0] - pC[0]) ** 2 + (color[1] - pC[1]) ** 2 + (color[2] - pC[2]) ** 2; if (dS < mDS) { mDS = dS; cC = pC; } }
+            return cC;
+        }
+
+        // --- Feature Functions ---
+        function calculatePSNR(original, quantized) {
+            const d1 = original.data, d2 = quantized.data;
+            let mse = 0, pixelCount = 0;
+            for (let i = 0; i < d1.length; i += 4) {
+                if (d1[i + 3] > 128) { // Only compare opaque pixels
+                    mse += (d1[i] - d2[i]) ** 2 + (d1[i + 1] - d2[i + 1]) ** 2 + (d1[i + 2] - d2[i + 2]) ** 2;
+                    pixelCount++;
+                }
+            }
+            if (mse === 0) return Infinity;
+            mse = mse / (pixelCount * 3);
+            return 20 * Math.log10(255) - 10 * Math.log10(mse);
+        }
+
+        function displayPalette(palette) {
+            paletteContainer.innerHTML = '';
+            palette.forEach((color, index) => {
+                const [r, g, b] = color;
+                const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                const swatch = document.createElement('div');
+                swatch.className = 'palette-swatch';
+                swatch.style.backgroundColor = hex;
+                // Store the current (potentially modified) RGB value of the swatch
+                swatch.dataset.r = r;
+                swatch.dataset.g = g;
+                swatch.dataset.b = b;
+                swatch.title = `Click to edit ${hex}`; // Updated title
+                swatch.innerHTML = `<span>${hex}</span>`;
+
+                // Attach event listener for custom color picking
+                swatch.addEventListener('click', (event) => {
+                    event.preventDefault();
+
+                    currentEditedSwatch = swatch; // Store reference to the clicked swatch
+
+                    activeSwatchOldColor = [
+                        parseInt(swatch.dataset.r),
+                        parseInt(swatch.dataset.g),
+                        parseInt(swatch.dataset.b)
+                    ];
+
+                    // Set initial values for RGB sliders
+                    rgbR.value = activeSwatchOldColor[0];
+                    rgbG.value = activeSwatchOldColor[1];
+                    rgbB.value = activeSwatchOldColor[2];
+                    rgbRValue.textContent = activeSwatchOldColor[0];
+                    rgbGValue.textContent = activeSwatchOldColor[1];
+                    rgbBValue.textContent = activeSwatchOldColor[2];
+
+                    // Convert RGB to HSL and set HSL slider values
+                    const hsl = rgbToHsl(activeSwatchOldColor[0], activeSwatchOldColor[1], activeSwatchOldColor[2]);
+                    hslH.value = hsl[0];
+                    hslS.value = hsl[1];
+                    hslL.value = hsl[2];
+                    hslHValue.textContent = hsl[0];
+                    hslSValue.textContent = `${hsl[1]}%`;
+                    hslLValue.textContent = `${hsl[2]}%`;
+
+                    // Update current color displays
+                    rgbCurrentColorDisplay.style.backgroundColor = hex;
+                    hslCurrentColorDisplay.style.backgroundColor = hex;
+
+
+                    customColorPicker.classList.remove('hidden');
+                    // Position the custom picker next to the clicked swatch or centrally
+                    const rect = swatch.getBoundingClientRect();
+
+                    // Calculate preferred position, ensure it's within viewport
+                    let pickerTop = rect.bottom + window.scrollY + 10;
+                    let pickerLeft = rect.left + window.scrollX;
+
+                    // Basic viewport check to prevent overflow
+                    if (pickerLeft + customColorPicker.offsetWidth > window.innerWidth) {
+                        pickerLeft = window.innerWidth - customColorPicker.offsetWidth - 20; // 20px padding from right
+                    }
+                    if (pickerLeft < 0) pickerLeft = 20; // 20px padding from left
+
+                    if (pickerTop + customColorPicker.offsetHeight > window.innerHeight + window.scrollY) {
+                        // If it overflows below, try to place it above
+                        pickerTop = rect.top + window.scrollY - customColorPicker.offsetHeight - 10;
+                        if (pickerTop < 0) pickerTop = 20; // If it overflows above too, just place at top
+                    }
+
+
+                    customColorPicker.style.top = `${pickerTop}px`;
+                    customColorPicker.style.left = `${pickerLeft}px`;
+
+                    // Ensure RGB tab is active by default when opening
+                    switchColorPickerTab('rgb');
+                });
+
+                paletteContainer.appendChild(swatch);
+            });
+        }
+
+        // Helper function to convert RGB to Hex
+        function rgbToHex(r, g, b) {
+            return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+        }
+
+        // --- Custom Color Picker Logic ---
+
+        function switchColorPickerTab(tabName) {
+            if (tabName === 'rgb') {
+                rgbPanel.classList.remove('hidden');
+                hslPanel.classList.add('hidden');
+                rgbTabBtn.classList.add('border-indigo-500', 'text-indigo-700');
+                rgbTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+                hslTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
+                hslTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+            } else if (tabName === 'hsl') {
+                hslPanel.classList.remove('hidden');
+                rgbPanel.classList.add('hidden');
+                hslTabBtn.classList.add('border-indigo-500', 'text-indigo-700');
+                hslTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+                rgbTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
+                rgbTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+            }
+        }
+
+        // Updates RGB slider values, associated text, current color display, and the image.
+        function updateRgbSlidersAndImage() {
+            const r = parseInt(rgbR.value);
+            const g = parseInt(rgbG.value);
+            const b = parseInt(rgbB.value);
+
+            rgbRValue.textContent = r;
+            rgbGValue.textContent = g;
+            rgbBValue.textContent = b;
+
+            const hex = rgbToHex(r, g, b);
+            rgbCurrentColorDisplay.style.backgroundColor = hex;
+            hslCurrentColorDisplay.style.backgroundColor = hex; // Keep HSL display synced
+
+            // Convert current RGB to HSL and update HSL sliders
+            const hsl = rgbToHsl(r, g, b);
+            hslH.value = hsl[0];
+            hslS.value = hsl[1];
+            hslL.value = hsl[2];
+            hslHValue.textContent = hsl[0];
+            hslSValue.textContent = `${hsl[1]}%`;
+            hslLValue.textContent = `${hsl[2]}%`;
+
+            // Update the quantized image live
+            const newColor = [r, g, b];
+            // Only update image if there's an active color being edited
+            if (currentQuantizedImageData && activeSwatchOldColor && currentEditedSwatch) {
+                replaceColorInImageData(currentQuantizedImageData, activeSwatchOldColor, newColor);
+                // Also update the visual swatch's color
+                currentEditedSwatch.style.backgroundColor = hex;
+                currentEditedSwatch.querySelector('span').textContent = hex.toUpperCase();
+                // Update the dataset so the next live update uses the correct 'old' color
+                currentEditedSwatch.dataset.r = r;
+                currentEditedSwatch.dataset.g = g;
+                currentEditedSwatch.dataset.b = b;
+                activeSwatchOldColor = newColor; // This is crucial for continuous re-triggering
+            }
+            updateStatus(`Changing color to ${hex}...`);
+        }
+
+        // Updates HSL slider values, associated text, current color display, and the image.
+        function updateHslSlidersAndImage() {
+            const h = parseInt(hslH.value);
+            const s = parseInt(hslS.value);
+            const l = parseInt(hslL.value);
+
+            hslHValue.textContent = h;
+            hslSValue.textContent = `${s}%`;
+            hslLValue.textContent = `${l}%`;
+
+            // Convert current HSL to RGB and update RGB sliders
+            const rgb = hslToRgb(h, s, l);
+            rgbR.value = rgb[0];
+            rgbG.value = rgb[1];
+            rgbB.value = rgb[2];
+            rgbRValue.textContent = rgb[0];
+            rgbGValue.textContent = rgb[1];
+            rgbBValue.textContent = rgb[2];
+
+            const hex = rgbToHex(rgb[0], rgb[1], rgb[2]);
+            hslCurrentColorDisplay.style.backgroundColor = hex;
+            rgbCurrentColorDisplay.style.backgroundColor = hex; // Keep RGB display synced
+
+            // Update the quantized image live
+            const newColor = rgb; // rgb is already [r, g, b]
+            if (currentQuantizedImageData && activeSwatchOldColor && currentEditedSwatch) {
+                replaceColorInImageData(currentQuantizedImageData, activeSwatchOldColor, newColor);
+                // Also update the visual swatch's color
+                currentEditedSwatch.style.backgroundColor = hex;
+                currentEditedSwatch.querySelector('span').textContent = hex.toUpperCase();
+                // Update the dataset so the next live update uses the correct 'old' color
+                currentEditedSwatch.dataset.r = rgb[0];
+                currentEditedSwatch.dataset.g = rgb[1];
+                currentEditedSwatch.dataset.b = rgb[2];
+                activeSwatchOldColor = newColor; // This is crucial for continuous re-triggering
+            }
+            updateStatus(`Changing color to ${hex}...`);
+        }
+
+        // Replaces a specific color in the quantized image data and updates the canvas.
+        function replaceColorInImageData(imageData, oldColor, newColor) {
+            const data = imageData.data;
+            const [oldR, oldG, oldB] = oldColor;
+            const [newR, newG, newB] = newColor;
+
+            // Only modify pixels if the colors are actually different
+            if (oldR === newR && oldG === newG && oldB === newB) {
+                return;
+            }
+
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i] === oldR &&
+                    data[i + 1] === oldG &&
+                    data[i + 2] === oldB &&
+                    data[i + 3] > 128) {
+
+                    data[i] = newR;
+                    data[i + 1] = newG;
+                    data[i + 2] = newB;
+                }
+            }
+            // Put the modified image data back onto the canvas to re-draw
+            quantizedCtx.putImageData(imageData, 0, 0);
+
+            // Recalculate PSNR after manual color modification
+            const psnr = calculatePSNR(originalImageData, imageData);
+            psnrValueEl.textContent = `${psnr.toFixed(2)} dB`;
+        }
+
+        // Finalizes the color change when "Confirm" is clicked.
+        function finalizeColorChange() {
+            if (!currentEditedSwatch || !currentQuantizedImageData || !activeSwatchOldColor) {
+                customColorPicker.classList.add('hidden');
+                return;
+            }
+
+            // Get the final color from the currently active panel's display values
+            let finalR, finalG, finalB;
+            if (!rgbPanel.classList.contains('hidden')) { // RGB panel is active
+                finalR = parseInt(rgbR.value);
+                finalG = parseInt(rgbG.value);
+                finalB = parseInt(rgbB.value);
+            } else { // HSL panel is active
+                const h = parseInt(hslH.value);
+                const s = parseInt(hslS.value);
+                const l = parseInt(hslL.value);
+                const rgb = hslToRgb(h, s, l);
+                finalR = rgb[0];
+                finalG = rgb[1];
+                finalB = rgb[2];
+            }
+            const newColor = [finalR, finalG, finalB];
+            const newHexColor = rgbToHex(finalR, finalG, finalB);
+
+            // Update the `currentPalette` array with the new color
+            const oldColorIndexInPalette = currentPalette.findIndex(c =>
+                c[0] === activeSwatchOldColor[0] &&
+                c[1] === activeSwatchOldColor[1] &&
+                c[2] === activeSwatchOldColor[2]
+            );
+
+            if (oldColorIndexInPalette !== -1) {
+                currentPalette[oldColorIndexInPalette] = newColor;
+            } else {
+                // This case should ideally not happen if activeSwatchOldColor is correctly managed,
+                // but as a fallback, if the color wasn't found in the current palette (e.g., if it was already changed by a prior live edit),
+                // we'll need to re-quantize or handle this more robustly. For now, we'll assume it's found.
+                console.warn("Old color not found in current palette during finalization. This might indicate a logic error or a rapidly changing palette.");
+            }
+
+            // Update the image with the final color. This is typically done by the live updates,
+            // but calling it once more ensures the final state is rendered.
+            replaceColorInImageData(currentQuantizedImageData, activeSwatchOldColor, newColor);
+
+            // Re-display the entire palette. This is crucial because it re-attaches
+            // event listeners to the updated swatches and ensures their `dataset`
+            // attributes reflect the very latest color for future edits.
+            displayPalette(currentPalette);
+
+            updateStatus(`Color finalized to ${newHexColor}.`);
+            customColorPicker.classList.add('hidden'); // Hide the custom picker
+
+            // Clear references for the next edit
+            currentEditedSwatch = null;
+            activeSwatchOldColor = null;
+        }
+
+        // Cancels the color change and reverts to the original color of the swatch
+        // by re-quantizing the image with the original palette.
+        function cancelColorChange() {
+            if (!originalImageData) { // If no original image, nothing to revert
+                customColorPicker.classList.add('hidden');
+                currentEditedSwatch = null;
+                activeSwatchOldColor = null;
+                return;
+            }
+
+            // Re-run the quantization process to restore the original colors
+            // based on the slider's current value. This effectively undoes all
+            // manual color edits.
+            startQuantization();
+            updateStatus("Color change cancelled. Quantized image reverted to original palette.");
+            customColorPicker.classList.add('hidden');
+            currentEditedSwatch = null;
+            activeSwatchOldColor = null;
+        }
+
+
+        // --- Color Conversion Functions ---
+        // RGB to HSL conversion (0-255, 0-255, 0-255 to 0-360, 0-100, 0-100)
+        function rgbToHsl(r, g, b) {
+            r /= 255; g /= 255; b /= 255;
+            let max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h, s, l = (max + min) / 2;
+
+            if (max === min) {
+                h = s = 0; // achromatic
+            } else {
+                let d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                }
+                h /= 6;
+            }
+            return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+        }
+
+        // HSL to RGB conversion (0-360, 0-100, 0-100 to 0-255, 0-255, 0-255)
+        function hslToRgb(h, s, l) {
+            h /= 360; s /= 100; l /= 100;
+            let r, g, b;
+
+            if (s === 0) {
+                r = g = b = l; // achromatic
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1 / 6) return p + (q - p) * 6 * t;
+                    if (t < 1 / 2) return q;
+                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                    return p;
+                };
+
+                let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                let p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+        }
+
+
+        function handleExportPalette() {
+            if (currentPalette.length === 0) return;
+            const hexCodes = currentPalette.map(c => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`).join('\n');
+            const blob = new Blob([hexCodes], { type: 'text/plain' }); const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `palette-${currentPalette.length}-colors.txt`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Runs an analysis for every color count up to the slider's value,
+         * populating a table with the results. This runs asynchronously to
+         * avoid freezing the UI.
+         */
+        async function runFullAnalysis() {
+            if (!originalImageData) return;
+
+            // --- Setup UI for analysis ---
+            runFullAnalysisBtn.disabled = true;
+            colorSlider.disabled = true;
+            fullAnalysisResults.classList.remove('hidden');
+            analysisTableBody.innerHTML = ''; // Clear previous results
+
+            const maxK = parseInt(colorSlider.value, 10);
+
+            // --- Asynchronous loop ---
+            for (let k = 2; k <= maxK; k++) {
+                // Yield to the event loop using a promise with setTimeout(0)
+                await new Promise(resolve => {
+                    setTimeout(() => {
+                        updateStatus(`Analyzing... ${k} of ${maxK} colors`);
+                        const { quantizedData } = quantize(originalImageData, k);
+                        const psnr = calculatePSNR(originalImageData, quantizedData);
+
+                        // Add results to the table
+                        const row = analysisTableBody.insertRow();
+                        const cell1 = row.insertCell(0);
+                        const cell2 = row.insertCell(1);
+                        cell1.textContent = k;
+                        cell2.textContent = psnr.toFixed(2);
+                        cell1.className = 'px-4 py-2';
+                        cell2.className = 'px-4 py-2 font-mono';
+
+                        resolve(); // Continue to the next iteration
+                    }, 0);
+                });
+            }
+
+            // --- Finalize UI state ---
+            updateStatus(`Full analysis complete for 2 to ${maxK} colors.`);
+            runFullAnalysisBtn.disabled = false;
+            colorSlider.disabled = false;
+        }
+    </script>
+</body>
+
+</html>
