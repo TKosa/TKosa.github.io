@@ -77,7 +77,7 @@
     let imageSrc=null,resultSrc=null,zoom=1;let CELL_SIZE=10;
     //Update CELL_SIZE based on pixel-size input
     const pixelSizeInput=document.getElementById('pixel-size');
-    pixelSizeInput.addEventListener('input',e=>{CELL_SIZE=parseInt(e.target.value,10);if(isNaN(CELL_SIZE)||CELL_SIZE<1)CELL_SIZE=10;generateLines();});
+    pixelSizeInput.addEventListener('input',e=>{CELL_SIZE=parseInt(e.target.value,10);if(isNaN(CELL_SIZE)||CELL_SIZE<1)CELL_SIZE=10;});
 
     const naturalDims=()=>({width:workspaceImg.naturalWidth,height:workspaceImg.naturalHeight});
 

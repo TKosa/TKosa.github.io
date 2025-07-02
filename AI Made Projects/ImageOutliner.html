@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Outliner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+        /* Custom styles for select dropdowns */
+        select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
+        }
+        /* Custom styles for better range slider appearance */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #d1d5db; /* gray-300 */
+            border-radius: 9999px;
+            outline: none;
+            opacity: 0.8;
+            transition: opacity .2s;
+        }
+        input[type="range"]:hover {
+            opacity: 1;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #4f46e5; /* indigo-600 */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #4f46e5; /* indigo-600 */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        /* CSS to prevent canvas blurring when scaled */
+        #image-canvas {
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col h-screen">
+
+    <!-- Top Controls Bar -->
+    <div class="bg-gray-800/80 backdrop-blur-sm shadow-lg p-3">
+        <div class="w-full max-w-7xl mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+            <!-- File Upload & Download -->
+            <div class="flex items-center gap-3">
+                <label for="image-upload" class="cursor-pointer bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 transition-all">
+                    Upload Image
+                </label>
+                <input type="file" id="image-upload" class="hidden" accept="image/*">
+                <button id="download-btn" class="w-full bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-700 transition-all disabled:bg-gray-500 disabled:cursor-not-allowed">
+                    Download
+                </button>
+            </div>
+
+            <!-- Divider -->
+            <div class="h-8 w-px bg-gray-600 hidden md:block"></div>
+
+            <!-- Outline Controls -->
+            <div class="flex items-center gap-4">
+                <div class="flex flex-col">
+                    <label for="outline-algorithm" class="text-xs font-medium text-gray-400 mb-1">Algorithm</label>
+                    <select id="outline-algorithm" class="bg-gray-700 border border-gray-600 rounded-md py-1 px-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="paint-fill" selected>Paint Fill</option>
+                        <option value="stamp">Stamp</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label for="outline-color" class="text-xs font-medium text-gray-400">Color</label>
+                    <input type="color" id="outline-color" value="#ffffff" class="p-0 h-8 w-12 block bg-gray-700 border border-gray-600 cursor-pointer rounded-md">
+                </div>
+                <div class="flex flex-col w-32">
+                    <label for="outline-thickness" class="text-xs font-medium text-gray-400 mb-1">Thickness: <span id="thickness-value">1</span>px</label>
+                    <input type="range" id="outline-thickness" min="0" max="50" value="1" class="w-full">
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="h-8 w-px bg-gray-600 hidden md:block"></div>
+
+            <!-- Glow Controls -->
+            <div id="glow-section" class="flex items-center gap-4">
+                <div class="flex items-center pt-3">
+                    <input id="glow-toggle" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                    <label for="glow-toggle" class="ml-2 block text-sm font-medium text-gray-300">Glow</label>
+                </div>
+                <div id="glow-controls" class="hidden items-center gap-4">
+                     <div class="flex flex-col w-32">
+                         <label for="glow-distance" class="text-xs font-medium text-gray-400 mb-1">Distance: <span id="glow-distance-value">3</span>px</label>
+                        <input type="range" id="glow-distance" min="1" max="50" value="3" class="w-full">
+                     </div>
+                     <div class="flex flex-col">
+                         <label for="glow-falloff" class="text-xs font-medium text-gray-400 mb-1">Falloff</label>
+                         <select id="glow-falloff" class="bg-gray-700 border border-gray-600 rounded-md py-1 px-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="quadratic" selected>Quadratic</option>
+                            <option value="linear">Linear</option>
+                        </select>
+                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="canvas-wrapper" class="flex-grow w-full relative bg-gray-900 flex items-center justify-center p-4 overflow-hidden">
+        <canvas id="image-canvas"></canvas>
+        <p id="placeholder-text" class="absolute inset-0 flex items-center justify-center text-gray-500 pointer-events-none">Your image will appear here</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM element references ---
+            const canvasWrapper = document.getElementById('canvas-wrapper');
+            const canvas = document.getElementById('image-canvas');
+            const ctx = canvas.getContext('2d');
+            const imageUpload = document.getElementById('image-upload');
+            const outlineAlgorithmSelect = document.getElementById('outline-algorithm');
+            const outlineColorInput = document.getElementById('outline-color');
+            const outlineThicknessInput = document.getElementById('outline-thickness');
+            const thicknessValueSpan = document.getElementById('thickness-value');
+            const placeholderText = document.getElementById('placeholder-text');
+            const downloadBtn = document.getElementById('download-btn');
+            const glowSection = document.getElementById('glow-section');
+            const glowToggle = document.getElementById('glow-toggle');
+            const glowControls = document.getElementById('glow-controls');
+            const glowDistanceInput = document.getElementById('glow-distance');
+            const glowDistanceValueSpan = document.getElementById('glow-distance-value');
+            const glowFalloffSelect = document.getElementById('glow-falloff');
+
+            // --- State variables ---
+            let image = null;
+            let outlineAlgorithm = outlineAlgorithmSelect.value;
+            let outlineColor = outlineColorInput.value;
+            let outlineThickness = parseInt(outlineThicknessInput.value, 10);
+            let isGlowEnabled = glowToggle.checked;
+            let glowDistance = parseInt(glowDistanceInput.value, 10);
+            let glowFalloff = glowFalloffSelect.value;
+            
+            // --- Initial state ---
+            downloadBtn.disabled = true;
+
+            function debounce(func, delay) {
+                let timeout;
+                return function(...args) {
+                    const context = this;
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(context, args), delay);
+                };
+            }
+
+            // --- Event Listeners ---
+            imageUpload.addEventListener('change', handleImageUpload);
+            outlineAlgorithmSelect.addEventListener('change', handleAlgorithmChange);
+            outlineColorInput.addEventListener('input', handleColorChange);
+            outlineThicknessInput.addEventListener('input', handleThicknessChange);
+            glowToggle.addEventListener('change', handleGlowToggle);
+            glowDistanceInput.addEventListener('input', handleGlowDistanceChange);
+            glowFalloffSelect.addEventListener('change', handleGlowFalloffChange);
+            downloadBtn.addEventListener('click', handleDownload);
+            
+            const debouncedRedraw = debounce(() => redrawCanvas(), 150);
+
+            function handleImageUpload(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        image = new Image();
+                        image.onload = () => {
+                            placeholderText.style.display = 'none';
+                            downloadBtn.disabled = false;
+                            redrawCanvas();
+                        };
+                        image.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+            
+            function handleAlgorithmChange(e) {
+                outlineAlgorithm = e.target.value;
+                glowSection.classList.toggle('hidden', outlineAlgorithm !== 'paint-fill');
+                redrawCanvas();
+            }
+
+            function handleColorChange(e) {
+                outlineColor = e.target.value;
+                debouncedRedraw();
+            }
+
+            function handleThicknessChange(e) {
+                outlineThickness = parseInt(e.target.value, 10);
+                thicknessValueSpan.textContent = outlineThickness;
+                debouncedRedraw();
+            }
+
+            function handleGlowToggle(e) {
+                isGlowEnabled = e.target.checked;
+                glowControls.classList.toggle('hidden', !isGlowEnabled);
+                redrawCanvas();
+            }
+
+            function handleGlowDistanceChange(e) {
+                glowDistance = parseInt(e.target.value, 10);
+                glowDistanceValueSpan.textContent = glowDistance;
+                debouncedRedraw();
+            }
+            
+            function handleGlowFalloffChange(e) {
+                glowFalloff = e.target.value;
+                debouncedRedraw();
+            }
+
+            function handleDownload() {
+                if (!image) return;
+                const link = document.createElement('a');
+                link.download = 'outlined-image.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }
+
+            function redrawCanvas() {
+                if (!image || !image.src) return;
+                
+                const glowIsActive = isGlowEnabled && outlineAlgorithm === 'paint-fill';
+                const totalPadding = outlineThickness + (glowIsActive ? glowDistance : 0);
+                
+                canvas.width = image.width + totalPadding * 2;
+                canvas.height = image.height + totalPadding * 2;
+                
+                // Fit canvas within the wrapper while maintaining aspect ratio
+                const wrapperRect = canvasWrapper.getBoundingClientRect();
+                const scale = Math.min((wrapperRect.width - 32) / canvas.width, (wrapperRect.height - 32) / canvas.height); // 32 for padding
+                canvas.style.width = `${canvas.width * scale}px`;
+                canvas.style.height = `${canvas.height * scale}px`;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (outlineThickness > 0 || glowIsActive) {
+                    drawOutline(ctx, image, outlineAlgorithm, outlineColor, outlineThickness, glowIsActive, glowDistance, glowFalloff);
+                }
+                ctx.drawImage(image, totalPadding, totalPadding);
+            }
+
+            function drawOutline(context, img, algorithm, color, thickness, glowEnabled, glowDist, falloff) {
+                 switch (algorithm) {
+                    case 'paint-fill':
+                        drawPaintFillOutline(context, img, color, thickness, glowEnabled, glowDist, falloff);
+                        break;
+                    case 'stamp':
+                        drawStampOutline(context, img, color, thickness);
+                        break;
+                }
+            }
+
+            function drawStampOutline(context, img, color, thickness) {
+                const width = img.width;
+                const height = img.height;
+                const padding = thickness;
+                
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = width;
+                tempCanvas.height = height;
+                tempCtx.drawImage(img, 0, 0);
+
+                const imageData = tempCtx.getImageData(0, 0, width, height);
+                const data = imageData.data;
+                const r = parseInt(color.substring(1, 3), 16);
+                const g = parseInt(color.substring(3, 5), 16);
+                const b = parseInt(color.substring(5, 7), 16);
+
+                for (let i = 0; i < data.length; i += 4) {
+                    if (data[i + 3] > 0) {
+                        data[i] = r; data[i + 1] = g; data[i + 2] = b;
+                    }
+                }
+                tempCtx.putImageData(imageData, 0, 0);
+                
+                for (let y = -thickness; y <= thickness; y++) {
+                    for (let x = -thickness; x <= thickness; x++) {
+                        if (x * x + y * y <= thickness * thickness) {
+                            context.drawImage(tempCanvas, padding + x, padding + y);
+                        }
+                    }
+                }
+            }
+            
+            function drawPaintFillOutline(context, img, color, thickness, glowEnabled, glowDist, falloff) {
+                const width = img.width;
+                const height = img.height;
+                const totalPadding = thickness + (glowEnabled ? glowDist : 0);
+
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = width;
+                tempCanvas.height = height;
+                tempCtx.drawImage(img, 0, 0);
+                const originalData = tempCtx.getImageData(0, 0, width, height).data;
+                
+                const isTransparent = (x, y) => {
+                    if (x < 0 || x >= width || y < 0 || y >= height) return true;
+                    return originalData[(y * width + x) * 4 + 3] === 0;
+                }
+
+                const exterior = new Uint8Array(width * height);
+                const floodQueue = [];
+                for (let x = 0; x < width; x++) {
+                    if (isTransparent(x, 0)) { floodQueue.push([x, 0]); exterior[0 * width + x] = 1; }
+                    if (isTransparent(x, height - 1)) { floodQueue.push([x, height - 1]); exterior[(height - 1) * width + x] = 1; }
+                }
+                for (let y = 1; y < height - 1; y++) {
+                    if (isTransparent(0, y)) { floodQueue.push([0, y]); exterior[y * width + 0] = 1; }
+                    if (isTransparent(width - 1, y)) { floodQueue.push([width - 1, y]); exterior[y * width + (width - 1)] = 1; }
+                }
+                
+                let head = 0;
+                while(head < floodQueue.length) {
+                    const [x, y] = floodQueue[head++];
+                    const neighbors = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]];
+                    for (const [nx, ny] of neighbors) {
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height && isTransparent(nx, ny) && !exterior[ny * width + nx]) {
+                            exterior[ny * width + nx] = 1;
+                            floodQueue.push([nx, ny]);
+                        }
+                    }
+                }
+
+                const outlineQueue = [];
+                const visited = new Uint8Array(width * height);
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        if (!isTransparent(x, y)) {
+                            const neighbors = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]];
+                            for(const [nx, ny] of neighbors) {
+                                if (nx >= 0 && nx < width && ny >= 0 && ny < height && exterior[ny * width + nx]) {
+                                    const i = ny * width + nx;
+                                    if(!visited[i]) {
+                                       visited[i] = 1;
+                                       outlineQueue.push({x: nx, y: ny, dist: 1});
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                const outlineImageData = context.createImageData(context.canvas.width, context.canvas.height);
+                const outlineData = outlineImageData.data;
+                const r = parseInt(color.substring(1, 3), 16);
+                const g = parseInt(color.substring(3, 5), 16);
+                const b = parseInt(color.substring(5, 7), 16);
+
+                head = 0;
+                while(head < outlineQueue.length) {
+                    const {x, y, dist} = outlineQueue[head++];
+                    
+                    let alpha = 0;
+                    if (dist <= thickness) {
+                        alpha = 255; 
+                    } else if (glowEnabled && glowDist > 0) {
+                        const glowProgress = (dist - thickness) / glowDist;
+                        if (falloff === 'quadratic') {
+                           const val = 1 - glowProgress;
+                           alpha = Math.max(0, 255 * val * val);
+                        } else { // linear
+                           alpha = Math.max(0, 255 * (1 - glowProgress));
+                        }
+                    }
+
+                    if (alpha > 0) {
+                        const canvasX = x + totalPadding;
+                        const canvasY = y + totalPadding;
+                        const canvasI = (canvasY * context.canvas.width + canvasX) * 4;
+                        if (alpha > outlineData[canvasI + 3]) {
+                            outlineData[canvasI] = r;
+                            outlineData[canvasI + 1] = g;
+                            outlineData[canvasI + 2] = b;
+                            outlineData[canvasI + 3] = alpha;
+                        }
+                    }
+                    
+                    if (dist < totalPadding) {
+                        const neighbors = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]];
+                        for(const [nx, ny] of neighbors) {
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                                const ni = ny * width + nx;
+                                if (!visited[ni] && isTransparent(nx, ny)) {
+                                    visited[ni] = 1;
+                                    outlineQueue.push({x: nx, y: ny, dist: dist + 1});
+                                }
+                            }
+                        }
+                    }
+                }
+                context.putImageData(outlineImageData, 0, 0);
+            }
+
+            // Resize canvas when window is resized
+            window.addEventListener('resize', () => {
+                if(image) {
+                    redrawCanvas();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
