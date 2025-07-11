@@ -48,6 +48,7 @@
             /* gray-400 */
         }
 
+        /* --- New Palette Styling --- */
         .palette-swatch {
             width: 100%;
             padding-top: 100%;
@@ -57,6 +58,12 @@
             border: 1px solid rgba(0, 0, 0, 0.1);
             cursor: pointer;
             overflow: hidden;
+            transition: transform 0.2s ease;
+        }
+
+        .palette-swatch:hover {
+            transform: scale(1.1);
+            z-index: 10;
         }
 
         .palette-swatch span {
@@ -70,8 +77,18 @@
             text-align: center;
             background-color: rgba(255, 255, 255, 0.8);
             color: #1f2937;
+            opacity: 0;
+            /* Hidden by default */
             transition: opacity 0.2s;
         }
+
+        .palette-swatch:hover span {
+            opacity: 1;
+            /* Show on hover */
+        }
+
+        /* --- End New Palette Styling --- */
+
 
         #analysisTableContainer {
             max-height: 400px;
@@ -131,17 +148,11 @@
         /* Pixel art rendering for canvases */
         canvas {
             image-rendering: optimizeSpeed;
-            /* Older, less precise */
             image-rendering: -moz-crisp-edges;
-            /* Firefox */
             image-rendering: -webkit-optimize-contrast;
-            /* Webkit (Safari, Chrome) */
             image-rendering: optimize-contrast;
-            /* CSS3 */
             image-rendering: pixelated;
-            /* CSS4 */
             -ms-interpolation-mode: nearest-neighbor;
-            /* IE (non-standard) */
         }
     </style>
 </head>
@@ -160,7 +171,11 @@
                 <div class="custom-file-button">
                     <label for="imageUpload"
                         class="w-full inline-flex items-center justify-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg cursor-pointer hover:bg-gray-300 transition-colors">
-                        <!-- SVG code has been removed from here -->
+                        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                        </svg>
                         <span id="fileName">Choose a PNG file...</span>
                     </label>
                     <input id="imageUpload" type="file" accept="image/png">
@@ -182,12 +197,22 @@
         <div class="mb-6">
             <label for="algorithmSelect" class="block mb-2 font-semibold text-gray-700">3. Select Algorithm</label>
             <select id="algorithmSelect"
-                class="block w-full px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-200 disabled:cursor-not-allowed">
-                <option value="median-cut">Median Cut - A simple default algorithm</option>
-                <option value="k-means">K-Means Clustering - More performant</option>
-                <option value="neuquant">NeuQuant - Produces a small output and works fast for large images</option>
-                <option value="octree">Octree Quantization - Higher quality and works for large images</option>
+                class="block w-full px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-200 disabled:cursor-not-allowed"
+                disabled>
+                <option value="median-cut">Median Cut - Speed+ Quality+</option>
+                <option value="k-means">K-means clustering - Quality++ Speed-</option>
+                <option value="neuquant">NeuQuant - Speed++ Quality-- Output Size--</option>
+                <option value="octree">Octree - Speed++ Quality-</option>
             </select>
+        </div>
+
+        <!-- Dithering Checkbox -->
+        <div class="mb-6">
+            <label for="ditheringCheckbox" class="flex items-center">
+                <input type="checkbox" id="ditheringCheckbox"
+                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" disabled>
+                <span class="ml-2 text-gray-700">Apply error diffusion dithering (Floyd-Steinberg)</span>
+            </label>
         </div>
 
 
@@ -226,8 +251,7 @@
                     from 2 up to the current slider value. Results will appear in a table below.</p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <!-- PSNR (Quality) widget was here, now moved above -->
+            <div class="grid grid-cols-1">
                 <div>
                     <div class="flex justify-between items-center mb-2">
                         <h4 class="font-semibold text-gray-800">Generated Palette</h4>
@@ -328,20 +352,22 @@
         const analysisTableBody = document.getElementById('analysisTableBody');
         const originalImageSizeEl = document.getElementById('originalImageSize');
         const quantizedImageSizeEl = document.getElementById('quantizedImageSize');
-        const appContainer = document.getElementById('appContainer'); // For drag/drop styling
-        const algorithmSelect = document.getElementById('algorithmSelect'); // New: Algorithm dropdown
+        const appContainer = document.getElementById('appContainer');
+        const algorithmSelect = document.getElementById('algorithmSelect');
+        const ditheringCheckbox = document.getElementById('ditheringCheckbox');
 
         const originalCtx = originalCanvas.getContext('2d');
         const quantizedCtx = quantizedCanvas.getContext('2d');
         let originalImageData = null;
         let currentPalette = [];
         let debounceTimer;
-        let currentImageFile = null; // Store the current image file for size display
+        let currentImageFile = null;
 
         // --- State variables for color editing ---
         let currentQuantizedImageData = null;
         let originalColorForEditing = null;
-        let previewColor = null;
+        let latestPreviewColor = null;      // Used to store the most recent preview color
+        let preEditImageData = null;        // Stores a snapshot of image data before editing
         let currentEditedSwatch = null;
 
         // --- Custom Color Picker DOM Elements ---
@@ -374,53 +400,35 @@
         hslL.addEventListener('input', updateHslSlidersAndImage);
         confirmColorBtn.addEventListener('click', finalizeColorChange);
         cancelColorBtn.addEventListener('click', cancelColorChange);
-        algorithmSelect.addEventListener('change', startQuantization); // New: Re-quantize when algorithm changes
+        algorithmSelect.addEventListener('change', startQuantization);
+        ditheringCheckbox.addEventListener('change', startQuantization);
 
         // Drag and Drop / Paste Listeners
         document.addEventListener('DOMContentLoaded', () => {
-            // Prevent default drag behaviors
             document.body.addEventListener('dragover', preventDefaults, false);
             document.body.addEventListener('dragleave', preventDefaults, false);
             document.body.addEventListener('drop', preventDefaults, false);
-
-            // Add visual feedback for drag over
             document.body.addEventListener('dragenter', () => appContainer.classList.add('drag-over'), false);
             document.body.addEventListener('dragleave', () => appContainer.classList.remove('drag-over'), false);
-            document.body.addEventListener('drop', () => appContainer.classList.remove('drag-over'), false);
-
-            document.body.addEventListener('drop', handleDrop, false);
+            document.body.addEventListener('drop', (e) => {
+                appContainer.classList.remove('drag-over');
+                handleDrop(e);
+            }, false);
             document.body.addEventListener('paste', handlePaste, false);
         });
 
         const debouncedQuantize = debounce(startQuantization, 250);
 
-        /**
-         * Prevents default event behavior (e.g., opening dropped files).
-         * @param {Event} e - The event object.
-         */
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
 
-        /**
-         * Handles image files from various sources (upload, drag/drop, paste).
-         * @param {File} file - The image file to process.
-         */
         function handleImageFile(file) {
-            if (!file || file.type !== 'image/png') {
-                updateStatus('Please select or drop/paste a PNG image file.', true);
-                fileNameEl.textContent = 'Choose a PNG file...';
-                originalImageSizeEl.textContent = '';
-                quantizedImageSizeEl.textContent = '';
+            if (!file || !file.type.startsWith('image/')) {
+                updateStatus('Please select or drop/paste a valid image file.', true);
                 return;
             }
-
-            currentImageFile = file; // Store the file
+            currentImageFile = file;
             fileNameEl.textContent = file.name.length > 20 ? `${file.name.substring(0, 17)}...` : file.name;
             originalImageSizeEl.textContent = `(${formatBytes(file.size)})`;
-
-
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
@@ -429,27 +437,14 @@
                     originalCanvas.height = img.height;
                     quantizedCanvas.width = img.width;
                     quantizedCanvas.height = img.height;
-
-                    // Disable image smoothing for crisp pixel art
-                    originalCtx.imageSmoothingEnabled = false;
-                    quantizedCtx.imageSmoothingEnabled = false;
-                    originalCtx.mozImageSmoothingEnabled = false; // For Firefox
-                    quantizedCtx.mozImageSmoothingEnabled = false; // For Firefox
-                    originalCtx.webkitImageSmoothingEnabled = false; // For Chrome/Safari
-                    quantizedCtx.webkitImageSmoothingEnabled = false; // For Chrome/Safari
-                    originalCtx.msImageSmoothingEnabled = false; // For Internet Explorer/Edge
-                    quantizedCtx.msImageSmoothingEnabled = false; // For Internet Explorer/Edge
-
+                    [originalCtx, quantizedCtx].forEach(ctx => { ctx.imageSmoothingEnabled = false; });
                     originalCtx.drawImage(img, 0, 0);
                     originalImageData = originalCtx.getImageData(0, 0, img.width, img.height);
                     resultContainer.classList.remove('hidden');
                     analysisContainer.classList.remove('hidden');
-                    fullAnalysisResults.classList.add('hidden'); // Hide full analysis table on new upload
-                    colorSlider.disabled = false;
-                    exportPaletteBtn.disabled = false;
-                    runFullAnalysisBtn.disabled = false;
-                    algorithmSelect.disabled = false; // Enable algorithm selection
-                    updateStatus('Image loaded. Move slider to change colors.');
+                    fullAnalysisResults.classList.add('hidden');
+                    [colorSlider, exportPaletteBtn, runFullAnalysisBtn, algorithmSelect, ditheringCheckbox].forEach(el => el.disabled = false);
+                    updateStatus('Image loaded. Ready to quantize.');
                     startQuantization();
                 };
                 img.src = event.target.result;
@@ -457,48 +452,22 @@
             reader.readAsDataURL(file);
         }
 
-        /**
-         * Handles the drop event for drag and drop.
-         * @param {DragEvent} e - The drag event object.
-         */
         function handleDrop(e) {
             preventDefaults(e);
-            const dt = e.dataTransfer;
-            const files = dt.files;
-
-            if (files.length > 0) {
-                handleImageFile(files[0]); // Process only the first dropped file
-            } else {
-                updateStatus('No file dropped or invalid file type.', true);
-            }
+            if (e.dataTransfer.files.length > 0) handleImageFile(e.dataTransfer.files[0]);
         }
 
-        /**
-         * Handles the paste event for pasting from clipboard.
-         * @param {ClipboardEvent} e - The clipboard event object.
-         */
         function handlePaste(e) {
             preventDefaults(e);
-            const items = e.clipboardData.items;
-
-            for (let i = 0; i < items.length; i++) {
-                if (items[i].type.indexOf('image') !== -1) {
-                    const file = items[i].getAsFile();
-                    if (file) {
-                        handleImageFile(file);
-                        return; // Process only the first image found
-                    }
+            for (const item of e.clipboardData.items) {
+                if (item.type.indexOf('image') !== -1) {
+                    const file = item.getAsFile();
+                    if (file) { handleImageFile(file); return; }
                 }
             }
             updateStatus('No image found in clipboard.', true);
         }
 
-        /**
-         * Formats a byte size into a human-readable string (e.g., KB, MB).
-         * @param {number} bytes - The size in bytes.
-         * @param {number} decimals - Number of decimal places.
-         * @returns {string} Formatted size string.
-         */
         function formatBytes(bytes, decimals = 2) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
@@ -508,12 +477,6 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
-        /**
-         * Debounces a function call to prevent it from being called too frequently.
-         * @param {Function} func - The function to debounce.
-         * @param {number} delay - The delay in milliseconds.
-         * @returns {Function} The debounced function.
-         */
         function debounce(func, delay) {
             return function (...args) {
                 clearTimeout(debounceTimer);
@@ -521,10 +484,6 @@
             };
         }
 
-        /**
-         * Handles the change event of the color slider.
-         * Updates the slider value display and triggers debounced quantization.
-         */
         function handleSliderChange() {
             sliderValueEl.textContent = colorSlider.value;
             if (originalImageData) {
@@ -533,296 +492,251 @@
             }
         }
 
-        /**
-         * Updates the status message displayed to the user.
-         * @param {string} message - The message to display.
-         * @param {boolean} [isError=false] - Whether the message is an error.
-         */
         function updateStatus(message, isError = false) {
             statusEl.textContent = message;
             statusEl.style.color = isError ? '#dc2626' : '#4b5563';
         }
 
-        /**
-         * Initiates the image quantization process using the current slider value and selected algorithm.
-         */
         function startQuantization() {
             if (!originalImageData) return;
             const k = parseInt(colorSlider.value, 10);
             const algorithm = algorithmSelect.value;
+            const useDithering = ditheringCheckbox.checked;
             let algorithmDescription = algorithmSelect.options[algorithmSelect.selectedIndex].textContent;
             updateStatus(`Processing for ${k} colors using ${algorithmDescription}...`);
+
             setTimeout(() => {
                 try {
-                    let quantizedResult;
+                    let paletteResult;
+                    let finalImageData; // Declare finalImageData here
+
                     if (algorithm === 'median-cut') {
-                        quantizedResult = quantizeMedianCut(originalImageData, k);
+                        paletteResult = quantizeMedianCut(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'k-means') {
-                        quantizedResult = quantizeKMeans(originalImageData, k);
+                        paletteResult = quantizeKMeans(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'neuquant') {
-                        quantizedResult = quantizeNeuQuant(originalImageData, k);
+                        paletteResult = quantizeNeuQuant(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'octree') {
-                        quantizedResult = quantizeOctree(originalImageData, k);
-                    }
-                    else {
+                        const octreeOutput = quantizeOctree(originalImageData, k);
+                        paletteResult = { palette: octreeOutput.palette }; // Extract palette
+                        finalImageData = octreeOutput.quantizedData; // Octree already provides mapped image
+                    } else {
                         throw new Error('Unknown quantization algorithm selected.');
                     }
 
-                    currentQuantizedImageData = new ImageData(
-                        new Uint8ClampedArray(quantizedResult.quantizedData.data),
-                        quantizedResult.quantizedData.width,
-                        quantizedResult.quantizedData.height
-                    );
+                    const uniquePalette = getUniquePalette(paletteResult.palette);
+                    currentPalette = uniquePalette;
+
+                    if (useDithering) {
+                        updateStatus('Applying dithering...');
+                        // Create a fresh ImageData object for dithering to avoid modifying original or already quantized data
+                        const ditheredImageData = new ImageData(new Uint8ClampedArray(originalImageData.data), originalImageData.width, originalImageData.height);
+                        applyErrorDiffusion(ditheredImageData, uniquePalette);
+                        finalImageData = ditheredImageData;
+                    }
+
+                    currentQuantizedImageData = finalImageData;
                     quantizedCtx.putImageData(currentQuantizedImageData, 0, 0);
 
-                    // Calculate and display PSNR
                     const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
                     psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
 
-                    // Calculate and display quantized image size
                     const quantizedDataUrl = quantizedCanvas.toDataURL('image/png');
                     const base64Data = quantizedDataUrl.split(',')[1];
-                    const estimatedSize = (base64Data.length * 0.75);
-                    quantizedImageSizeEl.textContent = `(${formatBytes(estimatedSize)})`;
+                    quantizedImageSizeEl.textContent = `(${formatBytes(base64Data.length * 0.75)})`;
 
-                    // Store and display the generated palette
-                    currentPalette = quantizedResult.palette;
                     displayPalette(currentPalette);
-                    updateStatus(`Image quantized to ${k} colors using ${algorithmDescription}.`);
+                    updateStatus(`Image quantized to ${currentPalette.length} unique colors.`);
                 } catch (error) {
                     console.error("Quantization error:", error);
                     updateStatus('An error occurred during quantization: ' + error.message, true);
                 }
-            }, 10); // Small delay to allow UI update
+            }, 10);
         }
 
-        /**
-         * Quantizes an image using the Median Cut algorithm with CIELAB ΔE76 distance accelerated by a k-d tree.
-         * Performs clustering in Lab space for both splitting and nearest‐neighbor mapping.
-         * @param {ImageData} imageData - The original image data.
-         * @param {number} k - The desired number of colors.
-         * @returns {{quantizedData: ImageData, palette: number[][]}} The quantized image data and the generated palette.
-         */
-        function quantizeMedianCut(imageData, k) {
-            const pixels = getPixelsMedianCut(imageData); // Now returns {rgb, lab} objects
-            if (pixels.length === 0) {
-                return {
-                    quantizedData: new ImageData(imageData.width, imageData.height),
-                    palette: []
-                };
+        function getUniquePalette(palette) {
+            const uniqueColors = new Map();
+            for (const color of palette) {
+                const key = color.join(',');
+                if (!uniqueColors.has(key)) uniqueColors.set(key, color);
             }
+            return Array.from(uniqueColors.values());
+        }
 
+        // --- DITHERING IMPLEMENTATION ---
+        function applyErrorDiffusion(imageData, palette) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+
+            const buffer = new Float32Array(data.length);
+            for (let i = 0; i < data.length; i++) buffer[i] = data[i];
+
+            const diffuse = (nx, ny, errR, errG, errB, factor) => {
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) return;
+                const nIdx = (ny * width + nx) * 4;
+                buffer[nIdx] += errR * factor;
+                buffer[nIdx + 1] += errG * factor;
+                buffer[nIdx + 2] += errB * factor;
+            };
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    const oldR = buffer[idx], oldG = buffer[idx + 1], oldB = buffer[idx + 2];
+                    const [newR, newG, newB] = findClosestColor([oldR, oldG, oldB], palette);
+                    data[idx] = newR; data[idx + 1] = newG; data[idx + 2] = newB;
+                    const errR = oldR - newR, errG = oldG - newG, errB = oldB - newB;
+                    diffuse(x + 1, y, errR, errG, errB, 7 / 16);
+                    diffuse(x - 1, y + 1, errR, errG, errB, 3 / 16);
+                    diffuse(x, y + 1, errR, errG, errB, 5 / 16);
+                    diffuse(x + 1, y + 1, errR, errG, errB, 1 / 16);
+                }
+            }
+        }
+
+
+        // --- QUANTIZATION ALGORITHMS (and their helpers) ---
+
+        function quantizeMedianCut(imageData, k) {
+            const pixels = getPixelsMedianCut(imageData);
+            if (pixels.length === 0) return { palette: [] };
             const initialBucket = [pixels];
             const buckets = splitBucketsMedianCut(initialBucket, k);
-            const palette = buckets.filter(b => b.length > 0).map(getAverageColorMedianCut); // getAverageColor now returns RGB
-            const quantizedData = mapPixelsToPaletteMedianCut(imageData, palette);
-            return { quantizedData, palette };
+            const palette = buckets.filter(b => b.length > 0).map(getAverageColorMedianCut);
+            return { palette };
         }
 
-        /**
-         * Quantizes an image using the K-Means Clustering algorithm.
-         * @param {ImageData} imageData - The original image data.
-         * @param {number} k - The desired number of colors.
-         * @param {number} maxIterations - Maximum number of iterations for K-Means.
-         * @returns {{quantizedData: ImageData, palette: number[][]}} The quantized image data and the generated palette.
-         */
         function quantizeKMeans(imageData, k, maxIterations = 20) {
-            const pixels = getPixelsRGB(imageData); // Use generic RGB pixel extractor
-
-            if (pixels.length === 0) return { quantizedData: new ImageData(imageData.width, imageData.height), palette: [] };
-            if (k > pixels.length) k = pixels.length; // Cannot have more centroids than pixels
-
-            // 1. Initialize centroids randomly from the image's pixels
+            const pixels = getPixelsRGB(imageData);
+            if (pixels.length === 0) return { palette: [] };
+            if (k > pixels.length) k = pixels.length;
             let centroids = [];
             const pixelIndices = Array.from({ length: pixels.length }, (_, i) => i);
             for (let i = 0; i < k; i++) {
                 const randomIndex = pixelIndices.splice(Math.floor(Math.random() * pixelIndices.length), 1)[0];
-                centroids.push([...pixels[randomIndex]]); // Use spread to copy array, not reference
+                centroids.push([...pixels[randomIndex]]);
             }
-
-            let assignments = new Uint32Array(pixels.length); // Store index of centroid for each pixel
+            let assignments = new Uint32Array(pixels.length);
             let changed = true;
-            let iteration = 0;
-
-            while (changed && iteration < maxIterations) {
+            for (let iteration = 0; changed && iteration < maxIterations; iteration++) {
                 changed = false;
-                iteration++;
-
-                // 2. Assignment Step: Assign each pixel to the closest centroid
                 for (let i = 0; i < pixels.length; i++) {
                     const pixel = pixels[i];
-                    let minDistanceSquared = Infinity;
-                    let closestCentroidIndex = -1;
-
+                    let minDistanceSquared = Infinity, closestCentroidIndex = -1;
                     for (let j = 0; j < k; j++) {
-                        const centroid = centroids[j];
-                        const distanceSquared =
-                            (pixel[0] - centroid[0]) ** 2 +
-                            (pixel[1] - centroid[1]) ** 2 +
-                            (pixel[2] - centroid[2]) ** 2;
-
-                        if (distanceSquared < minDistanceSquared) {
-                            minDistanceSquared = distanceSquared;
-                            closestCentroidIndex = j;
-                        }
+                        const dist = (pixel[0] - centroids[j][0]) ** 2 + (pixel[1] - centroids[j][1]) ** 2 + (pixel[2] - centroids[j][2]) ** 2;
+                        if (dist < minDistanceSquared) { minDistanceSquared = dist; closestCentroidIndex = j; }
                     }
-
-                    if (assignments[i] !== closestCentroidIndex) {
-                        assignments[i] = closestCentroidIndex;
+                    if (assignments[i] !== closestCentroidIndex) { assignments[i] = closestCentroidIndex; changed = true; }
+                }
+                const newCentroids = Array.from({ length: k }, () => [0, 0, 0, 0]);
+                for (let i = 0; i < pixels.length; i++) {
+                    const pixel = pixels[i], centroidIndex = assignments[i];
+                    if (centroidIndex !== -1) {
+                        newCentroids[centroidIndex][0] += pixel[0]; newCentroids[centroidIndex][1] += pixel[1];
+                        newCentroids[centroidIndex][2] += pixel[2]; newCentroids[centroidIndex][3]++;
+                    }
+                }
+                for (let i = 0; i < k; i++) {
+                    if (newCentroids[i][3] > 0) {
+                        centroids[i] = [Math.round(newCentroids[i][0] / newCentroids[i][3]), Math.round(newCentroids[i][1] / newCentroids[i][3]), Math.round(newCentroids[i][2] / newCentroids[i][3])];
+                    } else {
+                        centroids[i] = [...pixels[Math.floor(Math.random() * pixels.length)]];
                         changed = true;
                     }
                 }
-
-                // 3. Update Step: Recalculate centroids
-                const newCentroids = Array.from({ length: k }, () => [0, 0, 0, 0]); // [R, G, B, count]
-                for (let i = 0; i < pixels.length; i++) {
-                    const pixel = pixels[i];
-                    const centroidIndex = assignments[i];
-                    if (centroidIndex !== -1) { // Ensure pixel was assigned
-                        newCentroids[centroidIndex][0] += pixel[0];
-                        newCentroids[centroidIndex][1] += pixel[1];
-                        newCentroids[centroidIndex][2] += pixel[2];
-                        newCentroids[centroidIndex][3]++; // Increment count
-                    }
-                }
-
-                // Update centroids, only if there are pixels assigned to them
-                for (let i = 0; i < k; i++) {
-                    if (newCentroids[i][3] > 0) {
-                        centroids[i] = [
-                            Math.round(newCentroids[i][0] / newCentroids[i][3]),
-                            Math.round(newCentroids[i][1] / newCentroids[i][3]),
-                            Math.round(newCentroids[i][2] / newCentroids[i][3])
-                        ];
-                    } else {
-                        // If a centroid has no assigned pixels, re-initialize it randomly
-                        // This helps prevent "dead" centroids
-                        const randomIndex = Math.floor(Math.random() * pixels.length);
-                        centroids[i] = [...pixels[randomIndex]];
-                        changed = true; // Mark as changed to continue iterations
-                    }
-                }
             }
-
-            // The final palette is the set of centroids
-            const palette = centroids;
-
-            // Map original pixels to the closest color in the final palette
-            const quantizedData = mapPixelsToPaletteKMeans(imageData, palette); // Use a dedicated mapping function for KMeans
-            return { quantizedData, palette };
+            return { palette: centroids };
         }
 
-        /**
-         * Quantizes an image using a perceptually-weighted SOM (NeuQuant-like) algorithm.
-         * Neighbourhood is based on RGB-distance, not palette index; learning-rate and
-         * radius decay exponentially. Uses weighted RGB distance (0.30 R, 0.59 G, 0.11 B).
-         * @param {ImageData} imageData
-         * @param {number} k
-         * @param {number} initialLearningRate
-         * @param {number} initialRadius
-         * @param {number} maxIterations
-         * @returns {{quantizedData: ImageData, palette: number[][]}}
-         */
-        function quantizeNeuQuant(
-            imageData,
-            k,
-            initialLearningRate = 0.2,
-            initialRadius = 30,
-            maxIterations = 30 * k
-        ) {
-            const pixels = getPixelsRGB(imageData); // Use generic RGB pixel extractor
-
-            if (pixels.length === 0)
-                return { quantizedData: new ImageData(imageData.width, imageData.height), palette: [] };
-
-            const colorMap = Array.from({ length: k }, () => [
-                Math.floor(Math.random() * 256),
-                Math.floor(Math.random() * 256),
-                Math.floor(Math.random() * 256)
-            ]);
-
-            const numIters = Math.min(pixels.length, maxIterations);
-            const tau = numIters; // decay constant
-
+        function quantizeNeuQuant(imageData, k, initialLearningRate = 0.2, initialRadius = 30, maxIterations = 30 * k) {
+            const pixels = getPixelsRGB(imageData);
+            if (pixels.length === 0) return { palette: [] };
+            const colorMap = Array.from({ length: k }, () => [Math.floor(Math.random() * 256), Math.floor(Math.random() * 256), Math.floor(Math.random() * 256)]);
+            const numIters = Math.min(pixels.length, maxIterations), tau = numIters;
             for (let i = 0; i < numIters; i++) {
                 const currentPixel = pixels[Math.floor(Math.random() * pixels.length)];
-
-                // exponential decay
-                const learningRate = initialLearningRate * Math.exp(-i / tau);
-                const radius = initialRadius * Math.exp(-i / tau);
-
-                // find BMU
-                let bmuIndex = 0;
-                let minDist = Infinity;
+                const learningRate = initialLearningRate * Math.exp(-i / tau), radius = initialRadius * Math.exp(-i / tau);
+                let bmuIndex = 0, minDist = Infinity;
                 for (let j = 0; j < k; j++) {
                     const dist = weightedRgbDistance(currentPixel, colorMap[j]);
-                    if (dist < minDist) {
-                        minDist = dist;
-                        bmuIndex = j;
-                    }
+                    if (dist < minDist) { minDist = dist; bmuIndex = j; }
                 }
-
                 const bmuColor = colorMap[bmuIndex];
-
-                // update BMU and neighbours (based on RGB distance)
                 for (let j = 0; j < k; j++) {
                     const neighbourDist = weightedRgbDistance(colorMap[j], bmuColor);
                     if (neighbourDist <= radius) {
-                        const influence = Math.exp(-(neighbourDist * neighbourDist) / (2 * radius * radius));
-                        const alpha = learningRate * influence;
-
+                        const influence = Math.exp(-(neighbourDist * neighbourDist) / (2 * radius * radius)), alpha = learningRate * influence;
                         colorMap[j][0] = clamp(colorMap[j][0] + alpha * (currentPixel[0] - colorMap[j][0]));
                         colorMap[j][1] = clamp(colorMap[j][1] + alpha * (currentPixel[1] - colorMap[j][1]));
                         colorMap[j][2] = clamp(colorMap[j][2] + alpha * (currentPixel[2] - colorMap[j][2]));
                     }
                 }
             }
-
-            const palette = colorMap;
-            const quantizedData = mapPixelsToPaletteKMeans(imageData, palette); // Using KMeans mapper for consistency
-            return { quantizedData, palette };
+            return { palette: colorMap };
         }
 
-        // Min-heap for reducible nodes
+        /**
+         * MinHeap class for managing reducible nodes in Octree quantization.
+         * Nodes are ordered by their pixelCount (smallest first).
+         */
         class MinHeap {
             constructor() {
-                this.a = [];
+                this.heap = [];
             }
-            push(node) {
-                this.a.push(node);
-                this.#up(this.a.length - 1);
-            }
-            pop() {
-                if (this.a.length === 0) return null;
-                const top = this.a[0];
-                const last = this.a.pop();
-                if (this.a.length) {
-                    this.a[0] = last;
-                    this.#down(0);
-                }
-                return top;
-            }
+
             isEmpty() {
-                return this.a.length === 0;
+                return this.heap.length === 0;
             }
-            #up(i) {
-                while (i > 0) {
-                    const p = (i - 1) >> 1;
-                    if (this.a[i].pixelCount >= this.a[p].pixelCount) break;
-                    [this.a[i], this.a[p]] = [this.a[p], this.a[i]];
-                    i = p;
+
+            push(node) {
+                this.heap.push(node);
+                this.bubbleUp(this.heap.length - 1);
+            }
+
+            pop() {
+                if (this.isEmpty()) return null;
+                const min = this.heap[0];
+                const last = this.heap.pop();
+                if (this.heap.length > 0) {
+                    this.heap[0] = last;
+                    this.sinkDown(0);
+                }
+                return min;
+            }
+
+            bubbleUp(index) {
+                while (index > 0) {
+                    const parentIndex = Math.floor((index - 1) / 2);
+                    if (this.heap[parentIndex].pixelCount > this.heap[index].pixelCount) {
+                        [this.heap[parentIndex], this.heap[index]] = [this.heap[index], this.heap[parentIndex]];
+                        index = parentIndex;
+                    } else {
+                        break;
+                    }
                 }
             }
-            #down(i) {
-                while (true) {
-                    const l = (i << 1) + 1;
-                    const r = l + 1;
-                    let smallest = i;
-                    if (l < this.a.length && this.a[l].pixelCount < this.a[smallest].pixelCount) smallest = l;
-                    if (r < this.a.length && this.a[r].pixelCount < this.a[smallest].pixelCount) smallest = r;
-                    if (smallest === i) break;
-                    [this.a[i], this.a[smallest]] = [this.a[smallest], this.a[i]];
-                    i = smallest;
+
+            sinkDown(index) {
+                const leftChildIndex = 2 * index + 1;
+                const rightChildIndex = 2 * index + 2;
+                let smallestIndex = index;
+
+                if (leftChildIndex < this.heap.length && this.heap[leftChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) {
+                    smallestIndex = leftChildIndex;
+                }
+
+                if (rightChildIndex < this.heap.length && this.heap[rightChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) {
+                    smallestIndex = rightChildIndex;
+                }
+
+                if (smallestIndex !== index) {
+                    [this.heap[smallestIndex], this.heap[index]] = [this.heap[index], this.heap[smallestIndex]];
+                    this.sinkDown(smallestIndex);
                 }
             }
         }
@@ -883,13 +797,15 @@
                     this.children[oldIndex].greenSum = this.greenSum;
                     this.children[oldIndex].blueSum = this.blueSum;
                 }
-                
+
                 // This node is now an internal node.
                 this.isLeaf = false;
                 this.pixelCount = 0;
                 this.redSum = 0;
                 this.greenSum = 0;
                 this.blueSum = 0;
+
+                // Add this node to the reducible heap for its level
                 reducibleHeaps[this.level].push(this);
 
                 // Add the new pixel to its correct child.
@@ -956,6 +872,7 @@
             if (!pixels.length) return { quantizedData: new ImageData(imageData.width, imageData.height), palette: [] };
 
             const root = new OctreeNode(0, null);
+            // Create 8 heaps, one for each level (0-7)
             const reducibleHeaps = Array.from({ length: 8 }, () => new MinHeap());
 
             for (const pixel of pixels) {
@@ -967,385 +884,48 @@
             let leafCount = leaves.length;
 
             if (leafCount > k) {
-                let level = 7;
+                let level = 7; // Start from the deepest level
                 while (leafCount > k && level >= 0) {
-                    if (reducibleHeaps[level].isEmpty()) {
-                        level--;
-                        continue;
+                    // While there are nodes at this level that can be reduced and we still need to reduce colors
+                    while (!reducibleHeaps[level].isEmpty() && leafCount > k) {
+                        const node = reducibleHeaps[level].pop();
+                        if (!node) continue; // Should not happen with isEmpty check
+
+                        // Before merging, count how many leaves this node's children contribute
+                        const leavesToRemove = [];
+                        node.getLeaves(leavesToRemove); // This will collect all leaves under this node
+                        const removedLeafCount = leavesToRemove.length;
+
+                        node.mergeChildren(); // Merge children, making this node a leaf
+
+                        // Update the leaf count: subtract the removed children's leaves, add 1 for the new merged leaf
+                        leafCount = leafCount - removedLeafCount + 1;
+
+                        // If the node's parent is not a leaf and exists, add the parent to its reducible heap
+                        // This handles cases where merging a child makes a parent reducible
+                        if (node.parent && !node.parent.isLeaf && node.parent.level > 0) {
+                            // Check if the parent is already in its heap to avoid duplicates
+                            // (MinHeap doesn't have a direct 'contains' check, but for this context,
+                            // we can assume it's not if it was just made reducible)
+                            reducibleHeaps[node.parent.level].push(node.parent);
+                        }
                     }
-                    
-                    const node = reducibleHeaps[level].pop();
-                    if (!node) continue;
-
-                    // Correctly count all leaves that will be removed by the merge.
-                    const leavesToRemove = [];
-                    node.getLeaves(leavesToRemove);
-                    const removedLeafCount = leavesToRemove.length;
-
-                    node.mergeChildren();
-                    
-                    // Update the leaf count accurately.
-                    leafCount = leafCount - removedLeafCount + 1;
+                    level--; // Move to the next shallower level
                 }
             }
 
             const finalLeaves = [];
-            root.getLeaves(finalLeaves);
+            root.getLeaves(finalLeaves); // Collect all leaves after reduction
             const palette = finalLeaves.map(l => l.getAverageColor());
-            
-            const quantizedData = mapPixelsToPaletteKMeans(imageData, palette); // Using KMeans mapper for consistency
-            return { quantizedData, palette };
-        }
 
-
-        /**
-         * Calculates the perceptually weighted RGB distance between two colors.
-         * @param {number[]} a - First color [R, G, B].
-         * @param {number[]} b - Second color [R, G, B].
-         * @returns {number} The weighted Euclidean distance.
-         */
-        function weightedRgbDistance(a, b) {
-            const dR = a[0] - b[0];
-            const dG = a[1] - b[1];
-            const dB = a[2] - b[2];
-            return Math.sqrt(0.30 * dR * dR + 0.59 * dG * dG + 0.11 * dB * dB);
-        }
-
-        /**
-         * Clamps a value to the 0-255 range and rounds it.
-         * @param {number} v - The value to clamp.
-         * @returns {number} The clamped and rounded value.
-         */
-        function clamp(v) {
-            return Math.min(255, Math.max(0, Math.round(v)));
-        }
-
-
-        /**
-         * Extracts non-transparent pixels and converts them to Lab.
-         * This version is specifically for Median Cut.
-         * @param {ImageData} imageData
-         * @returns {Array<{rgb:number[],lab:number[]}>}
-         */
-        function getPixelsMedianCut(imageData) {
-            const pixels = [];
-            const data = imageData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                const alpha = data[i + 3];
-                if (alpha > 128) {
-                    const rgb = [data[i], data[i + 1], data[i + 2]];
-                    const lab = rgbToLab(rgb);
-                    pixels.push({ rgb, lab });
-                }
-            }
-            return pixels;
-        }
-
-        /**
-         * Extracts non-transparent pixel RGB values from ImageData.
-         * This is a generic utility function for algorithms that work in RGB space.
-         * @param {ImageData} imageData - The image data.
-         * @returns {number[][]} An array of [R, G, B] pixel arrays.
-         */
-        function getPixelsRGB(imageData) {
-            const pixels = [];
-            const data = imageData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                // Only consider pixels with significant alpha (not fully transparent)
-                if (data[i + 3] > 128) {
-                    pixels.push([data[i], data[i + 1], data[i + 2]]);
-                }
-            }
-            return pixels;
-        }
-
-        /**
-         * Splits buckets based on greatest Lab‐channel range.
-         * This version is specifically for Median Cut.
-         * @param {Array<Array<{rgb:number[],lab:number[]}>>} buckets
-         * @param {number} k
-         */
-        function splitBucketsMedianCut(buckets, k) {
-            while (buckets.length < k) {
-                let bucketToSplit = -1;
-                let maxRange = -1;
-                let channelIndexToSplit = -1;
-
-                for (let i = 0; i < buckets.length; i++) {
-                    const bucket = buckets[i];
-                    if (bucket.length > 1) {
-                        const { range, channelIndex } = findGreatestRangeChannelMedianCut(bucket);
-                        if (range > maxRange) {
-                            maxRange = range;
-                            bucketToSplit = i;
-                            channelIndexToSplit = channelIndex;
-                        }
-                    }
-                }
-
-                if (bucketToSplit === -1) break;
-
-                const bucket = buckets[bucketToSplit];
-                bucket.sort((a, b) => a.lab[channelIndexToSplit] - b.lab[channelIndexToSplit]);
-                const medianIndex = Math.floor(bucket.length / 2);
-                buckets.splice(
-                    bucketToSplit,
-                    1,
-                    bucket.slice(0, medianIndex),
-                    bucket.slice(medianIndex)
-                );
-            }
-            return buckets;
-        }
-
-        /**
-         * Finds the Lab channel with the greatest range in a bucket.
-         * This version is specifically for Median Cut.
-         * @param {Array<{rgb:number[],lab:number[]}>} bucket
-         */
-        function findGreatestRangeChannelMedianCut(bucket) {
-            let min0 = Infinity, max0 = -Infinity;
-            let min1 = Infinity, max1 = -Infinity;
-            let min2 = Infinity, max2 = -Infinity;
-
-            for (const p of bucket) {
-                const [L, a, b] = p.lab;
-                if (L < min0) min0 = L; if (L > max0) max0 = L;
-                if (a < min1) min1 = a; if (a > max1) max1 = a;
-                if (b < min2) min2 = b; if (b > max2) max2 = b;
-            }
-
-            const range0 = max0 - min0;
-            const range1 = max1 - min1;
-            const range2 = max2 - min2;
-
-            if (range0 >= range1 && range0 >= range2) return { channelIndex: 0, range: range0 };
-            if (range1 >= range0 && range1 >= range2) return { channelIndex: 1, range: range1 };
-            return { channelIndex: 2, range: range2 };
-        }
-
-        /**
-         * Averages Lab colors in a bucket and converts back to RGB.
-         * This version is specifically for Median Cut.
-         * @param {Array<{rgb:number[],lab:number[]}>} bucket
-         */
-        function getAverageColorMedianCut(bucket) {
-            let sumL = 0, sumA = 0, sumB = 0;
-            for (const p of bucket) {
-                sumL += p.lab[0];
-                sumA += p.lab[1];
-                sumB += p.lab[2];
-            }
-            const avgLab = [
-                sumL / bucket.length,
-                sumA / bucket.length,
-                sumB / bucket.length
-            ];
-            return labToRgb(avgLab);
-        }
-
-        /**
-         * Maps each pixel to the nearest palette color using a k-d tree in Lab space.
-         * This version is specifically for Median Cut.
-         * @param {ImageData} original
-         * @param {number[][]} palette
-         */
-        function mapPixelsToPaletteMedianCut(original, palette) {
-            const newImageData = new ImageData(original.width, original.height);
-            if (palette.length === 0) return newImageData;
-
-            const palettePoints = palette.map(rgb => ({ rgb, lab: rgbToLab(rgb) }));
-            const kdTree = buildKdTree(palettePoints);
-            const memo = new Map();
-
-            const originalData = original.data;
+            // Map pixels to the new palette using the Octree for efficient lookup
+            const newImageData = new ImageData(imageData.width, imageData.height);
+            const originalData = imageData.data;
             const newData = newImageData.data;
 
             for (let i = 0; i < originalData.length; i += 4) {
                 const alpha = originalData[i + 3];
-                if (alpha < 128) {
-                    newData[i]     = originalData[i];
-                    newData[i + 1] = originalData[i + 1];
-                    newData[i + 2] = originalData[i + 2];
-                    newData[i + 3] = alpha;
-                    continue;
-                }
-
-                const r = originalData[i],
-                      g = originalData[i + 1],
-                      b = originalData[i + 2];
-                const key = (r << 16) | (g << 8) | b;
-
-                let newColor = memo.get(key);
-                if (!newColor) {
-                    const lab = rgbToLab([r, g, b]);
-                    newColor = kdNearest(kdTree, lab).point.rgb;
-                    memo.set(key, newColor);
-                }
-
-                newData[i]     = newColor[0];
-                newData[i + 1] = newColor[1];
-                newData[i + 2] = newColor[2];
-                newData[i + 3] = alpha;
-            }
-
-            return newImageData;
-        }
-
-        // Color‐space conversions and KD‐tree utilities
-
-        function rgbToXyz([r, g, b]) {
-            let [sr, sg, sb] = [r, g, b].map(v => {
-                v /= 255;
-                return v > 0.04045
-                    ? Math.pow((v + 0.055) / 1.055, 2.4)
-                    : v / 12.92;
-            });
-            return [
-                sr * 0.4124564 + sg * 0.3575761 + sb * 0.1804375,
-                sr * 0.2126729 + sg * 0.7151522 + sb * 0.0721750,
-                sr * 0.0193339 + sg * 0.1191920 + sb * 0.9503041
-            ];
-        }
-
-        function xyzToLab([x, y, z]) {
-            const [Xn, Yn, Zn] = [0.95047, 1.00000, 1.08883]; // D65 Illuminant
-            const f = t => t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16/116);
-            const fx = f(x / Xn), fy = f(y / Yn), fz = f(z / Zn);
-            return [
-                116 * fy - 16,
-                500 * (fx - fy),
-                200 * (fy - fz)
-            ];
-        }
-
-        function rgbToLab(rgb) {
-            return xyzToLab(rgbToXyz(rgb));
-        }
-
-        function labToXyz([L, a, b]) {
-            const [Xn, Yn, Zn] = [0.95047, 1.00000, 1.08883];
-            const fy = (L + 16) / 116;
-            const fx = a / 500 + fy;
-            const fz = fy - b / 200;
-            const cube = t => t * t * t;
-            const inv = t => cube(t) > 0.008856 ? cube(t) : (t - 16/116) / 7.787;
-            return [
-                Xn * inv(fx),
-                Yn * inv(fy),
-                Zn * inv(fz)
-            ];
-        }
-
-        function xyzToRgb([x, y, z]) {
-            let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
-            let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
-            let b = x * 0.0557 + y * -0.2040 + z * 1.0570;
-            const gamma = v => v > 0.0031308
-                ? 1.055 * Math.pow(v, 1/2.4) - 0.055
-                : 12.92 * v;
-            r = Math.min(Math.max(0, gamma(r)), 1);
-            g = Math.min(Math.max(0, gamma(g)), 1);
-            b = Math.min(Math.max(0, gamma(b)), 1);
-            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-        }
-
-        function labToRgb(lab) {
-            return xyzToRgb(labToXyz(lab));
-        }
-
-        function distanceSquaredLab(a, b) {
-            const d0 = a[0] - b[0],
-                d1 = a[1] - b[1],
-                d2 = a[2] - b[2];
-            return d0 * d0 + d1 * d1 + d2 * d2;
-        }
-
-        function buildKdTree(points, depth = 0) {
-            if (points.length === 0) return null;
-            const axis = depth % 3; // Cycle through L, a, b axes
-            points.sort((a, b) => a.lab[axis] - b.lab[axis]);
-            const median = Math.floor(points.length / 2);
-            return {
-                point: points[median],
-                axis,
-                left: buildKdTree(points.slice(0, median), depth + 1),
-                right: buildKdTree(points.slice(median + 1), depth + 1)
-            };
-        }
-
-        function kdNearest(node, targetLab, best = { point: null, dist: Infinity }) {
-            if (!node) return best;
-
-            // Check current node
-            const d = distanceSquaredLab(targetLab, node.point.lab);
-            if (d < best.dist) {
-                best = { point: node.point, dist: d };
-            }
-
-            const axis = node.axis;
-            const diff = targetLab[axis] - node.point.lab[axis];
-
-            // Decide which child to search first
-            const nearer = diff < 0 ? node.left : node.right;
-            const farther = diff < 0 ? node.right : node.left;
-
-            // Search the nearer subtree
-            best = kdNearest(nearer, targetLab, best);
-
-            // Check if the farther subtree could contain a closer point
-            if (diff * diff < best.dist) {
-                best = kdNearest(farther, targetLab, best);
-            }
-
-            return best;
-        }
-
-        /**
-         * Finds the closest color in a palette to a given color using Euclidean distance in RGB space.
-         * This function is now specifically for K-Means and NeuQuant.
-         * @param {number[]} color - The [R, G, B] color to match.
-         * @param {number[][]} palette - The array of [R, G, B] colors in the palette.
-         * @returns {number[]} The closest [R, G, B] color from the palette.
-         */
-        function findClosestColor(color, palette) {
-            let minDistanceSquared = Infinity;
-            let closestColor = palette[0]; // Initialize with the first color in the palette
-
-            for (const paletteColor of palette) {
-                // Calculate squared Euclidean distance
-                const distanceSquared =
-                    (color[0] - paletteColor[0]) ** 2 +
-                    (color[1] - paletteColor[1]) ** 2 +
-                    (color[2] - paletteColor[2]) ** 2;
-
-                if (distanceSquared < minDistanceSquared) {
-                    minDistanceSquared = distanceSquared;
-                    closestColor = paletteColor;
-                }
-            }
-            return closestColor;
-        }
-
-        /**
-         * Maps each pixel in the original image to the closest color in the new palette.
-         * This version is specifically for KMeans and NeuQuant, using RGB distance.
-         * @param {ImageData} original - The original image data.
-         * @param {number[][]} palette - The new color palette.
-         * @returns {ImageData} The new image data with quantized colors.
-         */
-        function mapPixelsToPaletteKMeans(original, palette) {
-            const newImageData = new ImageData(original.width, original.height);
-            if (palette.length === 0) return newImageData; // Return empty if palette is empty
-
-            const originalData = original.data;
-            const newData = newImageData.data;
-            const memo = {}; // Memoization to avoid recalculating closest color for identical original pixels
-
-            for (let i = 0; i < originalData.length; i += 4) {
-                const alpha = originalData[i + 3];
-                // Preserve transparency for transparent pixels
-                if (alpha < 128) {
+                if (alpha < 128) { // Preserve transparent pixels
                     newData[i] = originalData[i];
                     newData[i + 1] = originalData[i + 1];
                     newData[i + 2] = originalData[i + 2];
@@ -1353,377 +933,181 @@
                     continue;
                 }
 
-                const r = originalData[i];
-                const g = originalData[i + 1];
-                const b = originalData[i + 2];
-                const key = `${r}|${g}|${b}`; // Create a unique key for the original color
-
-                let newColor = memo[key];
-                if (!newColor) {
-                    // If not memoized, find the closest color in the palette
-                    newColor = findClosestColor([r, g, b], palette);
-                    memo[key] = newColor; // Store for future use
+                const pixel = [originalData[i], originalData[i + 1], originalData[i + 2]];
+                let currentNode = root;
+                // Traverse the octree to find the closest leaf node
+                for (let level = 0; level <= 7; level++) { // Max level is 7 for 8-bit color
+                    if (currentNode.isLeaf) break; // Found the leaf or merged node
+                    const index = getOctreeChildIndex(pixel, level);
+                    if (!currentNode.children[index]) {
+                        // If path doesn't exist (e.g., due to reduction), use the current node's average color
+                        break;
+                    }
+                    currentNode = currentNode.children[index];
                 }
 
-                newData[i] = newColor[0];
-                newData[i + 1] = newColor[1];
-                newData[i + 2] = newColor[2];
-                newData[i + 3] = alpha; // Keep original alpha for non-transparent pixels
+                const closestColor = currentNode.getAverageColor();
+                newData[i] = closestColor[0];
+                newData[i + 1] = closestColor[1];
+                newData[i + 2] = closestColor[2];
+                newData[i + 3] = alpha;
             }
-            return newImageData;
+
+            return { quantizedData: newImageData, palette };
         }
 
-        /**
-         * Calculates the Peak Signal-to-Noise Ratio (PSNR) between two ImageData objects.
-         * @param {ImageData} original - The original image data.
-         * @param {ImageData} quantized - The quantized image data.
-         * @returns {number} The PSNR value in dB, or Infinity if images are identical.
-         */
-        function calculatePSNR(original, quantized) {
-            const dataOriginal = original.data;
-            const dataQuantized = quantized.data;
-            let mse = 0; // Mean Squared Error
-            let pixelCount = 0;
 
-            for (let i = 0; i < dataOriginal.length; i += 4) {
-                // Only consider non-transparent pixels for PSNR calculation
-                if (dataOriginal[i + 3] > 128) {
-                    mse += (dataOriginal[i] - dataQuantized[i]) ** 2;     // Red channel
-                    mse += (dataOriginal[i + 1] - dataQuantized[i + 1]) ** 2; // Green channel
-                    mse += (dataOriginal[i + 2] - dataQuantized[i + 2]) ** 2; // Blue channel
-                    pixelCount++;
-                }
-            }
+        function weightedRgbDistance(a, b) { const dR = a[0] - b[0], dG = a[1] - b[1], dB = a[2] - b[2]; return Math.sqrt(0.30 * dR * dR + 0.59 * dG * dG + 0.11 * dB * dB); }
+        function clamp(v) { return Math.min(255, Math.max(0, Math.round(v))); }
+        function getPixelsMedianCut(imageData) { const pixels = []; const data = imageData.data; for (let i = 0; i < data.length; i += 4) { if (data[i + 3] > 128) { const rgb = [data[i], data[i + 1], data[i + 2]]; pixels.push({ rgb, lab: rgbToLab(rgb) }); } } return pixels; }
+        function getPixelsRGB(imageData) { const pixels = []; const data = imageData.data; for (let i = 0; i < data.length; i += 4) { if (data[i + 3] > 128) pixels.push([data[i], data[i + 1], data[i + 2]]); } return pixels; }
+        function splitBucketsMedianCut(buckets, k) { while (buckets.length < k) { let bucketToSplit = -1, maxRange = -1, channelIndexToSplit = -1; for (let i = 0; i < buckets.length; i++) { if (buckets[i].length > 1) { const { range, channelIndex } = findGreatestRangeChannelMedianCut(buckets[i]); if (range > maxRange) { maxRange = range; bucketToSplit = i; channelIndexToSplit = channelIndex; } } } if (bucketToSplit === -1) break; const bucket = buckets[bucketToSplit]; bucket.sort((a, b) => a.lab[channelIndexToSplit] - b.lab[channelIndexToSplit]); const medianIndex = Math.floor(bucket.length / 2); buckets.splice(bucketToSplit, 1, bucket.slice(0, medianIndex), bucket.slice(medianIndex)); } return buckets; }
+        function findGreatestRangeChannelMedianCut(bucket) { let min0 = Infinity, max0 = -Infinity, min1 = Infinity, max1 = -Infinity, min2 = Infinity, max2 = -Infinity; for (const p of bucket) { const [L, a, b] = p.lab; if (L < min0) min0 = L; if (L > max0) max0 = L; if (a < min1) min1 = a; if (a > max1) max1 = a; if (b < min2) min2 = b; if (b > max2) max2 = b; } const range0 = max0 - min0, range1 = max1 - min1, range2 = max2 - min2; if (range0 >= range1 && range0 >= range2) return { channelIndex: 0, range: range0 }; if (range1 >= range0 && range1 >= range2) return { channelIndex: 1, range: range1 }; return { channelIndex: 2, range: range2 }; }
+        function getAverageColorMedianCut(bucket) { let sumL = 0, sumA = 0, sumB = 0; for (const p of bucket) { sumL += p.lab[0]; sumA += p.lab[1]; sumB += p.lab[2]; } return labToRgb([sumL / bucket.length, sumA / bucket.length, sumB / bucket.length]); }
+        function mapPixelsToPaletteMedianCut(original, palette) { const newImageData = new ImageData(original.width, original.height); if (palette.length === 0) return newImageData; const palettePoints = palette.map(rgb => ({ rgb, lab: rgbToLab(rgb) })); const kdTree = buildKdTree(palettePoints); const memo = new Map(); const originalData = original.data, newData = newImageData.data; for (let i = 0; i < originalData.length; i += 4) { const alpha = originalData[i + 3]; if (alpha < 128) { newData[i] = originalData[i]; newData[i + 1] = originalData[i + 1]; newData[i + 2] = originalData[i + 2]; newData[i + 3] = alpha; continue; } const r = originalData[i], g = originalData[i + 1], b = originalData[i + 2]; const key = (r << 16) | (g << 8) | b; let newColor = memo.get(key); if (!newColor) { newColor = kdNearest(kdTree, rgbToLab([r, g, b])).point.rgb; memo.set(key, newColor); } newData[i] = newColor[0]; newData[i + 1] = newColor[1]; newData[i + 2] = newColor[2]; newData[i + 3] = alpha; } return newImageData; }
+        function rgbToXyz([r, g, b]) { let [sr, sg, sb] = [r, g, b].map(v => { v /= 255; return v > 0.04045 ? Math.pow((v + 0.055) / 1.055, 2.4) : v / 12.92; }); return [sr * 0.4124564 + sg * 0.3575761 + sb * 0.1804375, sr * 0.2126729 + sg * 0.7151522 + sb * 0.0721750, sr * 0.0193339 + sg * 0.1191920 + sb * 0.9503041]; }
+        function xyzToLab([x, y, z]) { const [Xn, Yn, Zn] = [0.95047, 1.00000, 1.08883]; const f = t => t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116); const fx = f(x / Xn), fy = f(y / Yn), fz = f(z / Zn); return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]; }
+        function rgbToLab(rgb) { return xyzToLab(rgbToXyz(rgb)); }
+        function labToXyz([L, a, b]) { const [Xn, Yn, Zn] = [0.95047, 1.00000, 1.08883]; const fy = (L + 16) / 116, fx = a / 500 + fy, fz = fy - b / 200; const cube = t => t * t * t; const inv = t => cube(t) > 0.008856 ? cube(t) : (t - 16 / 116) / 7.787; return [Xn * inv(fx), Yn * inv(fy), Zn * inv(fz)]; }
+        function xyzToRgb([x, y, z]) { let r = x * 3.2406 + y * -1.5372 + z * -0.4986, g = x * -0.9689 + y * 1.8758 + z * 0.0415, b = x * 0.0557 + y * -0.2040 + z * 1.0570; const gamma = v => v > 0.0031308 ? 1.055 * Math.pow(v, 1 / 2.4) - 0.055 : 12.92 * v; return [Math.round(Math.min(Math.max(0, gamma(r)), 1) * 255), Math.round(Math.min(Math.max(0, gamma(g)), 1) * 255), Math.round(Math.min(Math.max(0, gamma(b)), 1) * 255)]; }
+        function labToRgb(lab) { return xyzToRgb(labToXyz(lab)); }
+        function distanceSquaredLab(a, b) { const d0 = a[0] - b[0], d1 = a[1] - b[1], d2 = a[2] - b[2]; return d0 * d0 + d1 * d1 + d2 * d2; }
+        function buildKdTree(points, depth = 0) { if (points.length === 0) return null; const axis = depth % 3; points.sort((a, b) => a.lab[axis] - b.lab[axis]); const median = Math.floor(points.length / 2); return { point: points[median], axis, left: buildKdTree(points.slice(0, median), depth + 1), right: buildKdTree(points.slice(median + 1), depth + 1) }; }
+        function kdNearest(node, targetLab, best = { point: null, dist: Infinity }) { if (!node) return best; const d = distanceSquaredLab(targetLab, node.point.lab); if (d < best.dist) best = { point: node.point, dist: d }; const axis = node.axis, diff = targetLab[axis] - node.point.lab[axis]; const [nearer, farther] = diff < 0 ? [node.left, node.right] : [node.right, node.left]; best = kdNearest(nearer, targetLab, best); if (diff * diff < best.dist) best = kdNearest(farther, targetLab, best); return best; }
+        function findClosestColor(color, palette) { let minDistanceSquared = Infinity, closestColor = palette[0]; for (const paletteColor of palette) { const distanceSquared = (color[0] - paletteColor[0]) ** 2 + (color[1] - paletteColor[1]) ** 2 + (color[2] - paletteColor[2]) ** 2; if (distanceSquared < minDistanceSquared) { minDistanceSquared = distanceSquared; closestColor = paletteColor; } } return closestColor; }
+        function mapPixelsToPaletteKMeans(original, palette) { const newImageData = new ImageData(original.width, original.height); if (palette.length === 0) return newImageData; const originalData = original.data, newData = newImageData.data, memo = {}; for (let i = 0; i < originalData.length; i += 4) { const alpha = originalData[i + 3]; if (alpha < 128) { newData[i] = originalData[i]; newData[i + 1] = originalData[i + 1]; newData[i + 2] = originalData[i + 2]; newData[i + 3] = alpha; continue; } const r = originalData[i], g = originalData[i + 1], b = originalData[i + 2]; const key = `${r}|${g}|${b}`; let newColor = memo[key]; if (!newColor) { newColor = findClosestColor([r, g, b], palette); memo[key] = newColor; } newData[i] = newColor[0]; newData[i + 1] = newColor[1]; newData[i + 2] = newColor[2]; newData[i + 3] = alpha; } return newImageData; }
+        function calculatePSNR(original, quantized) { const dataOriginal = original.data, dataQuantized = quantized.data; let mse = 0, pixelCount = 0; for (let i = 0; i < dataOriginal.length; i += 4) { if (dataOriginal[i + 3] > 128) { mse += (dataOriginal[i] - dataQuantized[i]) ** 2; mse += (dataOriginal[i + 1] - dataQuantized[i + 1]) ** 2; mse += (dataOriginal[i + 2] - dataQuantized[i + 2]) ** 2; pixelCount++; } } if (mse === 0) return Infinity; mse = mse / (pixelCount * 3); return 20 * Math.log10(255) - 10 * Math.log10(mse); }
 
-            if (mse === 0) {
-                return Infinity; // Perfect match, no error
-            }
-
-            // Average MSE over all color channels and pixels
-            mse = mse / (pixelCount * 3);
-            const maxPixelValue = 255; // Max possible pixel value for 8-bit images
-            return 20 * Math.log10(maxPixelValue) - 10 * Math.log10(mse);
-        }
-
-        /**
-         * Displays the generated color palette as clickable swatches.
-         * Each swatch allows editing its color.
-         * @param {number[][]} palette - The array of [R, G, B] colors in the palette.
-         */
         function displayPalette(palette) {
-            paletteContainer.innerHTML = ''; // Clear previous palette
+            paletteContainer.innerHTML = '';
             palette.forEach((color) => {
                 const [r, g, b] = color;
                 const hex = rgbToHex(r, g, b);
-
                 const swatch = document.createElement('div');
                 swatch.className = 'palette-swatch';
                 swatch.style.backgroundColor = hex;
-                swatch.dataset.r = r; // Store RGB values as data attributes
-                swatch.dataset.g = g;
-                swatch.dataset.b = b;
-                swatch.title = `Click to edit ${hex}`;
-                swatch.innerHTML = `<span>${hex}</span>`;
-
-                // Add event listener for editing a color in the palette
+                swatch.dataset.r = r; swatch.dataset.g = g; swatch.dataset.b = b;
+                swatch.title = `Click to edit ${hex.toUpperCase()} (or right-click to copy)`;
+                swatch.innerHTML = `<span>${hex.toUpperCase()}</span>`;
                 swatch.addEventListener('click', (event) => {
                     event.preventDefault();
-                    currentEditedSwatch = swatch; // Keep track of which swatch is being edited
+                    currentEditedSwatch = swatch;
                     originalColorForEditing = [parseInt(swatch.dataset.r), parseInt(swatch.dataset.g), parseInt(swatch.dataset.b)];
-                    previewColor = [...originalColorForEditing]; // Start preview with original color
-
+                    // Save a snapshot of the image data before editing begins
+                    preEditImageData = new ImageData(new Uint8ClampedArray(currentQuantizedImageData.data), currentQuantizedImageData.width, currentQuantizedImageData.height);
+                    latestPreviewColor = [...originalColorForEditing];
                     const currentHex = rgbToHex(...originalColorForEditing);
                     hslCurrentColorDisplay.style.backgroundColor = currentHex;
                     nativeColorPickerInCustom.value = currentHex;
-
-                    customColorPicker.classList.remove('hidden'); // Show the custom color picker
-
-                    // Position the color picker near the clicked swatch
+                    customColorPicker.classList.remove('hidden');
                     const rect = swatch.getBoundingClientRect();
-                    let pickerTop = rect.bottom + window.scrollY + 10;
-                    let pickerLeft = rect.left + window.scrollX;
-
-                    // Adjust position if it goes off-screen
-                    if (pickerLeft + customColorPicker.offsetWidth > window.innerWidth) {
-                        pickerLeft = window.innerWidth - customColorPicker.offsetWidth - 20;
-                    }
-                    if (pickerLeft < 0) pickerLeft = 20; // Ensure it's not off the left edge
-
-                    if (pickerTop + customColorPicker.offsetHeight > window.innerHeight + window.scrollY) {
-                        pickerTop = rect.top + window.scrollY - customColorPicker.offsetHeight - 10;
-                        if (pickerTop < 0) pickerTop = 20; // Ensure it's not off the top edge
-                    }
-
+                    let pickerTop = rect.bottom + window.scrollY + 10, pickerLeft = rect.left + window.scrollX;
+                    if (pickerLeft + customColorPicker.offsetWidth > window.innerWidth) pickerLeft = window.innerWidth - customColorPicker.offsetWidth - 20;
+                    if (pickerLeft < 0) pickerLeft = 20;
+                    if (pickerTop + customColorPicker.offsetHeight > window.innerHeight + window.scrollY) pickerTop = rect.top + window.scrollY - customColorPicker.offsetHeight - 10;
+                    if (pickerTop < 0) pickerTop = 20;
                     customColorPicker.style.top = `${pickerTop}px`;
                     customColorPicker.style.left = `${pickerLeft}px`;
-
-                    switchColorPickerTab('rgb'); // Default to RGB tab
+                    switchColorPickerTab('rgb');
+                });
+                swatch.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    navigator.clipboard.writeText(hex).then(() => { updateStatus(`Copied ${hex.toUpperCase()} to clipboard!`); });
                 });
                 paletteContainer.appendChild(swatch);
             });
         }
 
-        /**
-         * Replaces an old color with a new color in the quantized image data and redraws it.
-         * @param {ImageData} imageData - The quantized image data.
-         * @param {number[]} oldColor - The [R, G, B] color to replace.
-         * @param {number[]} newColor - The new [R, G, B] color.
-         */
         function replaceColorInImageData(imageData, oldColor, newColor) {
             const data = imageData.data;
-            const [oldR, oldG, oldB] = oldColor;
-            const [newR, newG, newB] = newColor;
-
+            const [oldR, oldG, oldB] = oldColor, [newR, newG, newB] = newColor;
             for (let i = 0; i < data.length; i += 4) {
-                // Check if the current pixel matches the old color
                 if (data[i] === oldR && data[i + 1] === oldG && data[i + 2] === oldB) {
-                    data[i] = newR;
-                    data[i + 1] = newG;
-                    data[i + 2] = newB;
+                    data[i] = newR; data[i + 1] = newG; data[i + 2] = newB;
                 }
             }
-            // Put the modified image data back onto the canvas
-            quantizedCtx.putImageData(imageData, 0, 0);
         }
 
-        /**
-         * Switches between RGB and HSL tabs in the custom color picker.
-         * @param {'rgb'|'hsl'} tabName - The name of the tab to switch to.
-         */
         function switchColorPickerTab(tabName) {
-            // Get the current color from the native color picker (which is always updated)
-            const currentHex = nativeColorPickerInCustom.value;
-            const [currentR, currentG, currentB] = hexToRgb(currentHex);
-
             if (tabName === 'rgb') {
                 rgbPanel.classList.remove('hidden');
                 hslPanel.classList.add('hidden');
                 rgbTabBtn.classList.add('border-indigo-500', 'text-indigo-700');
-                rgbTabBtn.classList.remove('border-transparent', 'text-gray-500');
+                rgbTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
                 hslTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
-                hslTabBtn.classList.add('border-transparent', 'text-gray-500');
+                hslTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+                // Set native color picker value based on current preview color
+                nativeColorPickerInCustom.value = rgbToHex(...latestPreviewColor);
             } else if (tabName === 'hsl') {
-                hslPanel.classList.remove('hidden');
                 rgbPanel.classList.add('hidden');
+                hslPanel.classList.remove('hidden');
                 hslTabBtn.classList.add('border-indigo-500', 'text-indigo-700');
-                hslTabBtn.classList.remove('border-transparent', 'text-gray-500');
+                hslTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
                 rgbTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
-                rgbTabBtn.classList.add('border-transparent', 'text-gray-500');
-
-                // Convert current RGB to HSL and update HSL sliders
-                const hsl = rgbToHsl(currentR, currentG, currentB);
-                hslH.value = hsl[0];
-                hslS.value = hsl[1];
-                hslL.value = hsl[2];
-                hslHValue.textContent = hsl[0];
-                hslSValue.textContent = `${hsl[1]}%`;
-                hslLValue.textContent = `${hsl[2]}%`;
-                hslCurrentColorDisplay.style.backgroundColor = currentHex;
+                rgbTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
+                // Set HSL sliders based on current preview color
+                const [h, s, l] = rgbToHsl(...latestPreviewColor);
+                hslH.value = h; hslS.value = s; hslL.value = l;
+                hslHValue.textContent = h; hslSValue.textContent = `${s}%`; hslLValue.textContent = `${l}%`;
+                hslCurrentColorDisplay.style.backgroundColor = rgbToHex(...latestPreviewColor);
             }
         }
 
-        /**
-         * Applies a live preview of the new color on the quantized image.
-         * @param {number[]} newColor - The new [R, G, B] color to preview.
-         */
         function handleLivePreview(newColor) {
-            if (!currentQuantizedImageData || !previewColor) return;
-
-            // Create a temporary copy of the current quantized image data for preview
-            const tempImageData = new ImageData(
-                new Uint8ClampedArray(currentQuantizedImageData.data),
-                currentQuantizedImageData.width,
-                currentQuantizedImageData.height
-            );
-
-            // Replace the old preview color with the new one in the temporary data
-            replaceColorInImageData(tempImageData, previewColor, newColor);
-
-            // Update the quantized canvas with the temporary data
+            if (!preEditImageData || !originalColorForEditing) return;
+            // Always work from a fresh copy of the pre-edit state.
+            const tempImageData = new ImageData(new Uint8ClampedArray(preEditImageData.data), preEditImageData.width, preEditImageData.height);
+            // Always replace the *original* color with the *new* preview color.
+            replaceColorInImageData(tempImageData, originalColorForEditing, newColor);
             quantizedCtx.putImageData(tempImageData, 0, 0);
-
-            // Update the previewColor to the new color for the next live preview step
-            previewColor = newColor;
+            latestPreviewColor = newColor;
             updateStatus(`Previewing color ${rgbToHex(...newColor)}...`);
         }
 
-        /**
-         * Handles input from the native color picker within the custom color picker.
-         * Updates the HSL display and triggers live preview.
-         */
-        function handleNativeColorPickerInput() {
-            const newColor = hexToRgb(nativeColorPickerInCustom.value);
-            hslCurrentColorDisplay.style.backgroundColor = nativeColorPickerInCustom.value;
-            handleLivePreview(newColor);
-        }
+        function handleNativeColorPickerInput() { const newColor = hexToRgb(nativeColorPickerInCustom.value); hslCurrentColorDisplay.style.backgroundColor = nativeColorPickerInCustom.value; handleLivePreview(newColor); }
+        function updateHslSlidersAndImage() { const h = parseInt(hslH.value), s = parseInt(hslS.value), l = parseInt(hslL.value); hslHValue.textContent = h; hslSValue.textContent = `${s}%`; hslLValue.textContent = `${l}%`; const newColor = hslToRgb(h, s, l); const hex = rgbToHex(...newColor); hslCurrentColorDisplay.style.backgroundColor = hex; nativeColorPickerInCustom.value = hex; handleLivePreview(newColor); }
 
-        /**
-         * Updates HSL slider values and triggers live preview based on HSL changes.
-         */
-        function updateHslSlidersAndImage() {
-            const h = parseInt(hslH.value);
-            const s = parseInt(hslS.value);
-            const l = parseInt(hslL.value);
-
-            hslHValue.textContent = h;
-            hslSValue.textContent = `${s}%`;
-            hslLValue.textContent = `${l}%`;
-
-            const newColor = hslToRgb(h, s, l);
-            const hex = rgbToHex(...newColor);
-            hslCurrentColorDisplay.style.backgroundColor = hex;
-            nativeColorPickerInCustom.value = hex; // Keep native picker in sync
-            handleLivePreview(newColor);
-        }
-
-        /**
-         * Finalizes the color change, updating the palette and recalculating PSNR.
-         */
         function finalizeColorChange() {
-            if (!originalColorForEditing || !previewColor) return;
-
-            // Find the index of the original color in the current palette
+            if (!originalColorForEditing || !latestPreviewColor) return;
+            // Apply the final color to the pre-edit snapshot and make it the new current state.
+            replaceColorInImageData(preEditImageData, originalColorForEditing, latestPreviewColor);
+            currentQuantizedImageData = preEditImageData;
             const oldColorStr = JSON.stringify(originalColorForEditing);
             const indexToUpdate = currentPalette.findIndex(p => JSON.stringify(p) === oldColorStr);
-
-            if (indexToUpdate > -1) {
-                currentPalette[indexToUpdate] = previewColor; // Update the palette with the new color
-            }
-
-            // Redraw the palette display to reflect the change
+            if (indexToUpdate > -1) currentPalette[indexToUpdate] = latestPreviewColor;
             displayPalette(currentPalette);
-
-            // Recalculate PSNR with the updated quantized image
             const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
             psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
-
-            updateStatus(`Color updated to ${rgbToHex(...previewColor)}.`, false);
-            customColorPicker.classList.add('hidden'); // Hide the color picker
-            originalColorForEditing = null; // Reset state
-            previewColor = null;
+            updateStatus(`Color updated to ${rgbToHex(...latestPreviewColor)}.`, false);
+            customColorPicker.classList.add('hidden');
+            originalColorForEditing = null; latestPreviewColor = null; preEditImageData = null; currentEditedSwatch = null;
         }
 
-        /**
-         * Cancels the color change, reverting the quantized image to its state before editing.
-         */
         function cancelColorChange() {
-            if (!originalColorForEditing || !previewColor) return;
-
-            // Revert the color in the current quantized image data
-            replaceColorInImageData(currentQuantizedImageData, previewColor, originalColorForEditing);
-
+            if (!preEditImageData) return;
+            // Restore the canvas from the pre-edit state.
+            quantizedCtx.putImageData(preEditImageData, 0, 0);
             updateStatus('Color change cancelled.', false);
-            customColorPicker.classList.add('hidden'); // Hide the color picker
-            originalColorForEditing = null; // Reset state
-            previewColor = null;
+            customColorPicker.classList.add('hidden');
+            originalColorForEditing = null; latestPreviewColor = null; preEditImageData = null; currentEditedSwatch = null;
         }
 
-        /**
-         * Converts RGB color values to a hexadecimal string.
-         * @param {number} r - Red component (0-255).
-         * @param {number} g - Green component (0-255).
-         * @param {number} b - Blue component (0-255).
-         * @returns {string} The hexadecimal color string (e.g., "#RRGGBB").
-         */
-        function rgbToHex(r, g, b) {
-            return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-        }
+        function rgbToHex(r, g, b) { return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase(); }
+        function hexToRgb(hex) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return [r, g, b]; }
+        function rgbToHsl(r, g, b) { r /= 255; g /= 255; b /= 255; const max = Math.max(r, g, b), min = Math.min(r, g, b); let h = 0, s, l = (max + min) / 2; if (max === min) { h = s = 0; } else { const d = max - min; s = l > 0.5 ? d / (2 - max - min) : d / (max + min); switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; case b: h = (r - g) / d + 4; break; } h /= 6; } return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)]; }
+        function hslToRgb(h, s, l) { h /= 360; s /= 100; l /= 100; let r, g, b; if (s === 0) { r = g = b = l; } else { const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; }; const q = l < 0.5 ? l * (1 + s) : l + s - l * s; const p = 2 * l - q; r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3); } return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]; }
 
-        /**
-         * Converts a hexadecimal color string to RGB values.
-         * @param {string} hex - The hexadecimal color string (e.g., "#RRGGBB").
-         * @returns {number[]} An array of [R, G, B] values.
-         */
-        function hexToRgb(hex) {
-            const r = parseInt(hex.slice(1, 3), 16);
-            const g = parseInt(hex.slice(3, 5), 16);
-            const b = parseInt(hex.slice(5, 7), 16);
-            return [r, g, b];
-        }
-
-        /**
-         * Converts RGB color values to HSL (Hue, Saturation, Lightness).
-         * @param {number} r - Red component (0-255).
-         * @param {number} g - Green component (0-255).
-         * @param {number} b - Blue component (0-255).
-         * @returns {number[]} An array of [H, S, L] values (H: 0-360, S: 0-100, L: 0-100).
-         */
-        function rgbToHsl(r, g, b) {
-            r /= 255;
-            g /= 255;
-            b /= 255;
-
-            const max = Math.max(r, g, b);
-            const min = Math.min(r, g, b);
-            let h, s, l = (max + min) / 2;
-
-            if (max === min) {
-                h = s = 0; // achromatic
-            } else {
-                const d = max - min;
-                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                switch (max) {
-                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                    case g: h = (b - r) / d + 2; break;
-                    case b: h = (r - g) / d + 4; break;
-                }
-                h /= 6;
-            }
-            return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
-        }
-
-        /**
-         * Converts HSL color values to RGB.
-         * @param {number} h - Hue (0-360).
-         * @param {number} s - Saturation (0-100).
-         * @param {number} l - Lightness (0-100).
-         * @returns {number[]} An array of [R, G, B] values (0-255).
-         */
-        function hslToRgb(h, s, l) {
-            h /= 360;
-            s /= 100;
-            l /= 100;
-
-            let r, g, b;
-
-            if (s === 0) {
-                r = g = b = l; // achromatic
-            } else {
-                const hue2rgb = (p, q, t) => {
-                    if (t < 0) t += 1;
-                    if (t > 1) t -= 1;
-                    if (t < 1 / 6) return p + (q - p) * 6 * t;
-                    if (t < 1 / 2) return q;
-                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-                    return p;
-                };
-
-                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                const p = 2 * l - q;
-                r = hue2rgb(p, q, h + 1 / 3);
-                g = hue2rgb(p, q, h);
-                b = hue2rgb(p, q, h - 1 / 3);
-            }
-
-            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-        }
-
-        /**
-         * Handles the export of the current color palette.
-         * Creates a text file with hex codes and triggers a download.
-         */
         function handleExportPalette() {
             if (!currentPalette || currentPalette.length === 0) {
                 updateStatus('No palette to export.', true);
                 return;
             }
-
             const paletteText = currentPalette.map(color => rgbToHex(...color)).join('\n');
             const blob = new Blob([paletteText], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `color_palette_${colorSlider.value}_colors.txt`;
+            a.download = 'palette.txt';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -1731,70 +1115,53 @@
             updateStatus('Palette exported successfully!');
         }
 
-        /**
-         * Runs a full analysis, calculating PSNR for color counts from 2 up to the current slider value.
-         * Displays results in a table.
-         */
         async function runFullAnalysis() {
             if (!originalImageData) {
                 updateStatus('Please upload an image first.', true);
                 return;
             }
-
-            runFullAnalysisBtn.disabled = true;
-            colorSlider.disabled = true;
-            exportPaletteBtn.disabled = true;
-            algorithmSelect.disabled = true; // Disable during full analysis
+            runFullAnalysisBtn.disabled = true; colorSlider.disabled = true; exportPaletteBtn.disabled = true; algorithmSelect.disabled = true; ditheringCheckbox.disabled = true;
             fullAnalysisResults.classList.remove('hidden');
-            analysisTableBody.innerHTML = ''; // Clear previous results
-
+            analysisTableBody.innerHTML = '';
             const maxColors = parseInt(colorSlider.value, 10);
             let previousPsnr = null;
             const algorithm = algorithmSelect.value;
-            const algorithmDescription = algorithmSelect.options[algorithmSelect.selectedIndex].textContent;
-
-
+            const useDithering = ditheringCheckbox.checked;
             for (let k = 2; k <= maxColors; k++) {
-                updateStatus(`Running full analysis: Processing for ${k} colors (${algorithmDescription})...`);
-                // Use a small delay to allow UI to update and prevent browser freezing
+                updateStatus(`Analysis: Processing for ${k} colors...`);
                 await new Promise(resolve => setTimeout(resolve, 10));
-
                 try {
-                    let quantizedResult;
+                    let paletteResult;
+                    let finalImageData;
+
                     if (algorithm === 'median-cut') {
-                        quantizedResult = quantizeMedianCut(originalImageData, k);
+                        paletteResult = quantizeMedianCut(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'k-means') {
-                        quantizedResult = quantizeKMeans(originalImageData, k);
+                        paletteResult = quantizeKMeans(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'neuquant') {
-                        quantizedResult = quantizeNeuQuant(originalImageData, k);
+                        paletteResult = quantizeNeuQuant(originalImageData, k);
+                        finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'octree') {
-                        quantizedResult = quantizeOctree(originalImageData, k);
-                    }
-                    else {
+                        const octreeOutput = quantizeOctree(originalImageData, k);
+                        paletteResult = { palette: octreeOutput.palette };
+                        finalImageData = octreeOutput.quantizedData;
+                    } else {
                         throw new Error('Unknown quantization algorithm selected.');
                     }
+                    const uniquePalette = getUniquePalette(paletteResult.palette);
 
-                    const tempQuantizedImageData = new ImageData(
-                        new Uint8ClampedArray(quantizedResult.quantizedData.data),
-                        quantizedResult.quantizedData.width,
-                        quantizedResult.quantizedData.height
-                    );
-                    const psnr = calculatePSNR(originalImageData, tempQuantizedImageData);
-
+                    if (useDithering) {
+                        finalImageData = new ImageData(new Uint8ClampedArray(originalImageData.data), originalImageData.width, originalImageData.height);
+                        applyErrorDiffusion(finalImageData, uniquePalette);
+                    }
+                    const psnr = calculatePSNR(originalImageData, finalImageData);
                     const row = analysisTableBody.insertRow();
                     row.className = 'border-b border-gray-100';
-
-                    const cellColorCount = row.insertCell();
-                    cellColorCount.className = 'px-4 py-2';
-                    cellColorCount.textContent = k;
-
-                    const cellPsnr = row.insertCell();
-                    cellPsnr.className = 'px-4 py-2';
-                    cellPsnr.textContent = isFinite(psnr) ? psnr.toFixed(2) : '∞';
-
+                    row.insertCell().textContent = k;
+                    row.insertCell().textContent = isFinite(psnr) ? psnr.toFixed(2) : '∞';
                     const cellDelta = row.insertCell();
-                    cellDelta.className = 'px-4 py-2';
-
                     if (previousPsnr !== null && isFinite(psnr) && isFinite(previousPsnr)) {
                         const delta = psnr - previousPsnr;
                         cellDelta.textContent = delta.toFixed(2);
@@ -1803,26 +1170,18 @@
                         cellDelta.textContent = 'N/A';
                     }
                     previousPsnr = psnr;
-
-                    // Scroll to the latest entry
-                    analysisTableBody.scrollTop = analysisTableBody.scrollHeight;
-
+                    analysisTableContainer.scrollTop = analysisTableContainer.scrollHeight;
                 } catch (error) {
                     console.error(`Error during full analysis for ${k} colors:`, error);
                     const row = analysisTableBody.insertRow();
                     row.className = 'border-b border-gray-100 text-red-600';
-                    row.insertCell().textContent = k;
-                    row.insertCell().textContent = 'Error';
-                    row.insertCell().textContent = 'Error';
+                    row.insertCell().textContent = k; row.insertCell().textContent = 'Error'; row.insertCell().textContent = 'Error';
                     updateStatus(`An error occurred during analysis for ${k} colors.`, true);
-                    break; // Stop analysis on error
+                    break;
                 }
             }
             updateStatus('Full analysis complete!');
-            runFullAnalysisBtn.disabled = false;
-            colorSlider.disabled = false;
-            exportPaletteBtn.disabled = false;
-            algorithmSelect.disabled = false; // Re-enable after full analysis
+            runFullAnalysisBtn.disabled = false; colorSlider.disabled = false; exportPaletteBtn.disabled = false; algorithmSelect.disabled = false; ditheringCheckbox.disabled = false;
         }
     </script>
 </body>
