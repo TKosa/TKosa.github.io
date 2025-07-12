@@ -254,13 +254,35 @@
             <div class="grid grid-cols-1">
                 <div>
                     <div class="flex justify-between items-center mb-2">
-                        <h4 class="font-semibold text-gray-800">Generated Palette</h4>
+                        <h4 class="font-semibold text-gray-800">Current Palette</h4>
                         <button id="exportPaletteBtn"
                             class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
                             disabled>Export</button>
                     </div>
                     <div id="paletteContainer"
                         class="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-2 bg-gray-50 p-4 rounded-lg">
+                    </div>
+
+                    <!-- Custom Palette Upload Section -->
+                    <div class="mt-6 pt-4 border-t border-gray-200">
+                        <h4 class="font-semibold text-gray-800 mb-2">Upload Custom Palette</h4>
+                        <div class="flex items-center space-x-2">
+                            <div class="custom-file-button flex-grow">
+                                <label for="paletteUpload"
+                                    class="w-full inline-flex items-center justify-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg cursor-pointer hover:bg-gray-300 transition-colors">
+                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 0115.9 6L16 6a3 3 0 013 3v10a2 2 0 01-2 2H7a2 2 0 01-2-2v-1a1 1 0 011-1h1z">
+                                        </path>
+                                    </svg>
+                                    <span id="paletteFileName">Upload Palette (TXT)...</span>
+                                </label>
+                                <input id="paletteUpload" type="file" accept=".txt">
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">Upload a .txt file with hex (#RRGGBB or RRGGBB) or RGB
+                            (R,G,B) colors, one per line.</p>
                     </div>
                 </div>
             </div>
@@ -356,12 +378,18 @@
         const algorithmSelect = document.getElementById('algorithmSelect');
         const ditheringCheckbox = document.getElementById('ditheringCheckbox');
 
+        // New palette upload elements
+        const paletteUpload = document.getElementById('paletteUpload');
+        const paletteFileNameEl = document.getElementById('paletteFileName');
+
+
         const originalCtx = originalCanvas.getContext('2d');
         const quantizedCtx = quantizedCanvas.getContext('2d');
         let originalImageData = null;
         let currentPalette = [];
         let debounceTimer;
         let currentImageFile = null;
+        let isCustomPaletteActive = false; // New state variable
 
         // --- State variables for color editing ---
         let currentQuantizedImageData = null;
@@ -402,6 +430,8 @@
         cancelColorBtn.addEventListener('click', cancelColorChange);
         algorithmSelect.addEventListener('change', startQuantization);
         ditheringCheckbox.addEventListener('change', startQuantization);
+        paletteUpload.addEventListener('change', (e) => handlePaletteUpload(e.target.files[0]));
+
 
         // Drag and Drop / Paste Listeners
         document.addEventListener('DOMContentLoaded', () => {
@@ -443,7 +473,11 @@
                     resultContainer.classList.remove('hidden');
                     analysisContainer.classList.remove('hidden');
                     fullAnalysisResults.classList.add('hidden');
-                    [colorSlider, exportPaletteBtn, runFullAnalysisBtn, algorithmSelect, ditheringCheckbox].forEach(el => el.disabled = false);
+
+                    // Enable/disable controls based on image presence
+                    setControlsEnabled(true);
+                    isCustomPaletteActive = false; // Reset custom palette state
+                    paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
                     updateStatus('Image loaded. Ready to quantize.');
                     startQuantization();
                 };
@@ -487,8 +521,7 @@
         function handleSliderChange() {
             sliderValueEl.textContent = colorSlider.value;
             if (originalImageData) {
-                updateStatus(`Waiting to process for ${colorSlider.value} colors...`);
-                debouncedQuantize();
+                startQuantization(); // Trigger quantization immediately
             }
         }
 
@@ -497,8 +530,22 @@
             statusEl.style.color = isError ? '#dc2626' : '#4b5563';
         }
 
+        function setControlsEnabled(enabled) {
+            // All controls related to image processing should be enabled if an image is loaded
+            colorSlider.disabled = !enabled;
+            algorithmSelect.disabled = !enabled;
+            runFullAnalysisBtn.disabled = !enabled;
+            exportPaletteBtn.disabled = !enabled;
+            ditheringCheckbox.disabled = !enabled;
+            paletteUpload.disabled = !enabled; // Enable palette upload if image is loaded
+        }
+
         function startQuantization() {
             if (!originalImageData) return;
+
+            isCustomPaletteActive = false; // When an algorithm runs, custom palette is no longer active
+            paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
+
             const k = parseInt(colorSlider.value, 10);
             const algorithm = algorithmSelect.value;
             const useDithering = ditheringCheckbox.checked;
@@ -508,7 +555,7 @@
             setTimeout(() => {
                 try {
                     let paletteResult;
-                    let finalImageData; // Declare finalImageData here
+                    let finalImageData;
 
                     if (algorithm === 'median-cut') {
                         paletteResult = quantizeMedianCut(originalImageData, k);
@@ -964,7 +1011,7 @@
         function splitBucketsMedianCut(buckets, k) { while (buckets.length < k) { let bucketToSplit = -1, maxRange = -1, channelIndexToSplit = -1; for (let i = 0; i < buckets.length; i++) { if (buckets[i].length > 1) { const { range, channelIndex } = findGreatestRangeChannelMedianCut(buckets[i]); if (range > maxRange) { maxRange = range; bucketToSplit = i; channelIndexToSplit = channelIndex; } } } if (bucketToSplit === -1) break; const bucket = buckets[bucketToSplit]; bucket.sort((a, b) => a.lab[channelIndexToSplit] - b.lab[channelIndexToSplit]); const medianIndex = Math.floor(bucket.length / 2); buckets.splice(bucketToSplit, 1, bucket.slice(0, medianIndex), bucket.slice(medianIndex)); } return buckets; }
         function findGreatestRangeChannelMedianCut(bucket) { let min0 = Infinity, max0 = -Infinity, min1 = Infinity, max1 = -Infinity, min2 = Infinity, max2 = -Infinity; for (const p of bucket) { const [L, a, b] = p.lab; if (L < min0) min0 = L; if (L > max0) max0 = L; if (a < min1) min1 = a; if (a > max1) max1 = a; if (b < min2) min2 = b; if (b > max2) max2 = b; } const range0 = max0 - min0, range1 = max1 - min1, range2 = max2 - min2; if (range0 >= range1 && range0 >= range2) return { channelIndex: 0, range: range0 }; if (range1 >= range0 && range1 >= range2) return { channelIndex: 1, range: range1 }; return { channelIndex: 2, range: range2 }; }
         function getAverageColorMedianCut(bucket) { let sumL = 0, sumA = 0, sumB = 0; for (const p of bucket) { sumL += p.lab[0]; sumA += p.lab[1]; sumB += p.lab[2]; } return labToRgb([sumL / bucket.length, sumA / bucket.length, sumB / bucket.length]); }
-        function mapPixelsToPaletteMedianCut(original, palette) { const newImageData = new ImageData(original.width, original.height); if (palette.length === 0) return newImageData; const palettePoints = palette.map(rgb => ({ rgb, lab: rgbToLab(rgb) })); const kdTree = buildKdTree(palettePoints); const memo = new Map(); const originalData = original.data, newData = newImageData.data; for (let i = 0; i < originalData.length; i += 4) { const alpha = originalData[i + 3]; if (alpha < 128) { newData[i] = originalData[i]; newData[i + 1] = originalData[i + 1]; newData[i + 2] = originalData[i + 2]; newData[i + 3] = alpha; continue; } const r = originalData[i], g = originalData[i + 1], b = originalData[i + 2]; const key = (r << 16) | (g << 8) | b; let newColor = memo.get(key); if (!newColor) { newColor = kdNearest(kdTree, rgbToLab([r, g, b])).point.rgb; memo.set(key, newColor); } newData[i] = newColor[0]; newData[i + 1] = newColor[1]; newData[i + 2] = newColor[2]; newData[i + 3] = alpha; } return newImageData; }
+        function mapPixelsToPaletteMedianCut(original, palette) { const newImageData = new ImageData(original.width, original.height); if (palette.length === 0) return newImageData; const palettePoints = palette.map(rgb => ({ rgb, lab: rgbToLab(rgb) })); const kdTree = buildKdTree(palettePoints); const memo = new Map(); const originalData = original.data, newData = newImageData.data; for (let i = 0; i < originalData.length; i += 4) { const alpha = originalData[i + 3]; if (alpha < 128) { newData[i] = originalData[i]; newData[i + 1] = originalData[i + 1]; newData[i + 2] = originalData[i + 2]; newData[i + 3] = alpha; continue; } const r = originalData[i], g = originalData[i + 1], b = original[i + 2]; const key = (r << 16) | (g << 8) | b; let newColor = memo.get(key); if (!newColor) { newColor = kdNearest(kdTree, rgbToLab([r, g, b])).point.rgb; memo.set(key, newColor); } newData[i] = newColor[0]; newData[i + 1] = newColor[1]; newData[i + 2] = newColor[2]; newData[i + 3] = alpha; } return newImageData; }
         function rgbToXyz([r, g, b]) { let [sr, sg, sb] = [r, g, b].map(v => { v /= 255; return v > 0.04045 ? Math.pow((v + 0.055) / 1.055, 2.4) : v / 12.92; }); return [sr * 0.4124564 + sg * 0.3575761 + sb * 0.1804375, sr * 0.2126729 + sg * 0.7151522 + sb * 0.0721750, sr * 0.0193339 + sg * 0.1191920 + sb * 0.9503041]; }
         function xyzToLab([x, y, z]) { const [Xn, Yn, Zn] = [0.95047, 1.00000, 1.08883]; const f = t => t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116); const fx = f(x / Xn), fy = f(y / Yn), fz = f(z / Zn); return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]; }
         function rgbToLab(rgb) { return xyzToLab(rgbToXyz(rgb)); }
@@ -1093,7 +1140,22 @@
         }
 
         function rgbToHex(r, g, b) { return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase(); }
-        function hexToRgb(hex) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return [r, g, b]; }
+        function hexToRgb(hex) {
+            const hexValue = hex.startsWith('#') ? hex.slice(1) : hex;
+            if (hexValue.length === 3) {
+                // Handle shorthand hex: #RGB -> #RRGGBB
+                const r = parseInt(hexValue[0] + hexValue[0], 16);
+                const g = parseInt(hexValue[1] + hexValue[1], 16);
+                const b = parseInt(hexValue[2] + hexValue[2], 16);
+                return [r, g, b];
+            } else if (hexValue.length === 6) {
+                const r = parseInt(hexValue.slice(0, 2), 16);
+                const g = parseInt(hexValue.slice(2, 4), 16);
+                const b = parseInt(hexValue.slice(4, 6), 16);
+                return [r, g, b];
+            }
+            return [0, 0, 0]; // Invalid hex
+        }
         function rgbToHsl(r, g, b) { r /= 255; g /= 255; b /= 255; const max = Math.max(r, g, b), min = Math.min(r, g, b); let h = 0, s, l = (max + min) / 2; if (max === min) { h = s = 0; } else { const d = max - min; s = l > 0.5 ? d / (2 - max - min) : d / (max + min); switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; case b: h = (r - g) / d + 4; break; } h /= 6; } return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)]; }
         function hslToRgb(h, s, l) { h /= 360; s /= 100; l /= 100; let r, g, b; if (s === 0) { r = g = b = l; } else { const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; }; const q = l < 0.5 ? l * (1 + s) : l + s - l * s; const p = 2 * l - q; r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3); } return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]; }
 
@@ -1120,16 +1182,24 @@
                 updateStatus('Please upload an image first.', true);
                 return;
             }
-            runFullAnalysisBtn.disabled = true; colorSlider.disabled = true; exportPaletteBtn.disabled = true; algorithmSelect.disabled = true; ditheringCheckbox.disabled = true;
+            // Disable controls during full analysis
+            setControlsEnabled(false);
+            runFullAnalysisBtn.disabled = true; // Keep this explicitly disabled until analysis is done
+
             fullAnalysisResults.classList.remove('hidden');
             analysisTableBody.innerHTML = '';
             const maxColors = parseInt(colorSlider.value, 10);
             let previousPsnr = null;
             const algorithm = algorithmSelect.value;
             const useDithering = ditheringCheckbox.checked;
+
+            isCustomPaletteActive = false; // Full analysis uses algorithm, so custom palette is no longer active
+            paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
+
+
             for (let k = 2; k <= maxColors; k++) {
                 updateStatus(`Analysis: Processing for ${k} colors...`);
-                await new Promise(resolve => setTimeout(resolve, 10));
+                await new Promise(resolve => setTimeout(resolve, 10)); // Allow UI to update
                 try {
                     let paletteResult;
                     let finalImageData;
@@ -1181,8 +1251,108 @@
                 }
             }
             updateStatus('Full analysis complete!');
-            runFullAnalysisBtn.disabled = false; colorSlider.disabled = false; exportPaletteBtn.disabled = false; algorithmSelect.disabled = false; ditheringCheckbox.disabled = false;
+            setControlsEnabled(true); // Re-enable controls after analysis
         }
+
+        // --- Custom Palette Upload Functions ---
+        function handlePaletteUpload(file) {
+            if (!file || !file.type.startsWith('text/')) {
+                updateStatus('Please select a valid text file for the palette.', true);
+                return;
+            }
+            paletteFileNameEl.textContent = file.name.length > 20 ? `${file.name.substring(0, 17)}...` : file.name;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const uploadedPalette = parsePaletteFile(event.target.result);
+                    if (uploadedPalette.length === 0) {
+                        updateStatus('No valid colors found in the palette file.', true);
+                        return;
+                    }
+                    applyCustomPalette(uploadedPalette); // No need for setCustomActive param, always true now
+                    updateStatus(`Custom palette with ${uploadedPalette.length} colors loaded.`);
+                } catch (error) {
+                    console.error("Error parsing palette file:", error);
+                    updateStatus('Error parsing palette file. Please check format.', true);
+                }
+            };
+            reader.readAsText(file);
+
+            // Crucial for allowing re-uploading the same file
+            paletteUpload.value = '';
+        }
+
+        function parsePaletteFile(text) {
+            const lines = text.split('\n');
+            const palette = [];
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line) return;
+
+                let color = null;
+                // Try parsing as hex
+                if (line.startsWith('#')) {
+                    color = hexToRgb(line);
+                } else if (line.length === 6 || line.length === 3) { // RRGGBB or RGB (shorthand) without #
+                    color = hexToRgb(line);
+                }
+                // Try parsing as RGB (e.g., "255,0,128")
+                else if (line.includes(',')) {
+                    const parts = line.split(',').map(p => parseInt(p.trim(), 10));
+                    if (parts.length === 3 && parts.every(p => !isNaN(p) && p >= 0 && p <= 255)) {
+                        color = parts;
+                    }
+                }
+
+                if (color && color.every(c => !isNaN(c))) {
+                    palette.push(color);
+                } else {
+                    console.warn(`Could not parse color: ${line}`);
+                }
+            });
+            return palette;
+        }
+
+        function applyCustomPalette(palette) { // Removed setCustomActive param
+            if (!originalImageData) {
+                updateStatus('Please upload an image first to apply a palette.', true);
+                return;
+            }
+
+            isCustomPaletteActive = true; // Always true when custom palette is applied
+            currentPalette = getUniquePalette(palette); // Ensure unique colors and correct format
+
+            const useDithering = ditheringCheckbox.checked;
+            let mappedImageData;
+
+            if (useDithering) {
+                updateStatus('Applying dithering with custom palette...');
+                mappedImageData = new ImageData(new Uint8ClampedArray(originalImageData.data), originalImageData.width, originalImageData.height);
+                applyErrorDiffusion(mappedImageData, currentPalette);
+            } else {
+                mappedImageData = mapPixelsToPaletteKMeans(originalImageData, currentPalette);
+            }
+
+            currentQuantizedImageData = mappedImageData;
+            quantizedCtx.putImageData(currentQuantizedImageData, 0, 0);
+
+            const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
+            psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
+
+            const quantizedDataUrl = quantizedCanvas.toDataURL('image/png');
+            const base64Data = quantizedDataUrl.split(',')[1];
+            quantizedImageSizeEl.textContent = `(${formatBytes(base64Data.length * 0.75)})`;
+
+            displayPalette(currentPalette);
+            // No need to call updatePaletteControlsState here, as controls are always enabled if image is loaded
+            updateStatus(`Image mapped to custom palette with ${currentPalette.length} unique colors.`);
+        }
+
+        // Initial state update on load (only enable if image is present)
+        document.addEventListener('DOMContentLoaded', () => {
+            setControlsEnabled(false); // Initially disable all controls until an image is loaded
+        });
+
     </script>
 </body>
 
