@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mind-Map</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+        .help-table td, .help-table th {
+            border: 1px solid #e5e7eb;
+            padding: 4px 8px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body class="overflow-hidden bg-gray-100 cursor-grab active:cursor-grabbing">
+
+    <!-- Main SVG Canvas -->
+    <svg id="canvas" class="w-full h-screen">
+        <defs id="defs"></defs>
+        <g id="viewport">
+            <g id="edges-layer"></g>
+            <g id="nodes-layer"></g>
+        </g>
+    </svg>
+
+    <!-- UI Toolbar -->
+    <div class="absolute top-0 left-0 right-0 bg-white shadow-md z-10">
+        <div class="p-2 flex items-center gap-2 flex-wrap border-b">
+            <button id="add-node-btn" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors text-sm">Add Node</button>
+            <button id="delete-node-btn" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm" disabled>Delete Node</button>
+            
+            <div class="h-6 border-l border-gray-300 mx-2"></div>
+
+            <button id="export-btn" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors text-sm">Export JSON</button>
+            <label for="import-file" class="cursor-pointer text-center px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors text-sm">Import JSON</label>
+            <input type="file" id="import-file" class="hidden" accept=".json">
+
+            <div class="flex-grow"></div> <!-- Spacer -->
+
+            <button id="help-btn" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors text-sm">Help (?)</button>
+        </div>
+        <textarea id="text-editor" rows="3" class="w-full p-2 text-base border-t-0 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-shadow outline-none" placeholder="Select a node to edit its text..."></textarea>
+    </div>
+    
+    <!-- Help Modal -->
+    <div id="help-modal" class="hidden absolute top-20 right-4 p-4 bg-white rounded-lg shadow-lg border z-20">
+        <h3 class="font-bold mb-2">Controls</h3>
+        <table class="help-table text-sm">
+            <tbody>
+                <tr><td>Left-drag canvas</td><td>Pan View</td></tr>
+                <tr><td>Left-drag node</td><td>Move Node</td></tr>
+                <tr><td>Wheel on canvas</td><td>Zoom View</td></tr>
+                <tr><td>Wheel on node</td><td>Resize Node</td></tr>
+                <tr><td>Left-click node, then right-click another node</td><td>Toggle Edge</td></tr>
+                <tr><td>Resize text entry box</td><td>Drag it's bottom right corner</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script type="module">
+        // --- CONSTANTS ---
+        const MAX_LINES = 4;
+        const MAX_CHARS_PER_LINE = 18;
+        const BASE_FONT_SIZE = 12;
+        const DEFAULT_NODE_RADIUS = 60;
+        
+        // --- DOM Elements ---
+        const svg = document.getElementById('canvas');
+        const viewport = document.getElementById('viewport');
+        const defs = document.getElementById('defs');
+        const nodesLayer = document.getElementById('nodes-layer');
+        const edgesLayer = document.getElementById('edges-layer');
+        const textEditor = document.getElementById('text-editor');
+        const addNodeBtn = document.getElementById('add-node-btn');
+        const helpBtn = document.getElementById('help-btn');
+        const helpModal = document.getElementById('help-modal');
+        const exportBtn = document.getElementById('export-btn');
+        const importFile = document.getElementById('import-file');
+        const deleteNodeBtn = document.getElementById('delete-node-btn');
+
+        // --- Data Model & UI State ---
+        let nodes = [];
+        let transform = { x: window.innerWidth / 2, y: window.innerHeight / 2, scale: 1 };
+        let nextId = 1;
+        let selectedNodeId = null;
+
+        // Interaction state
+        let isPanning = false;
+        let isDraggingNode = false;
+        let dragStart = { x: 0, y: 0 };
+        let nodeDragStart = { x: 0, y: 0 };
+        const DRAG_THRESHOLD = 3;
+
+        // --- Initial Data ---
+        function loadInitialData() {
+            nodes = [
+                { id: 1, x: -150, y: 0, radius: DEFAULT_NODE_RADIUS, text: 'Central Topic', outgoingEdges: [2, 3], incomingEdges: [] },
+                { id: 2, x: 100, y: -100, radius: DEFAULT_NODE_RADIUS, text: 'Sub-topic A\n(Right-click me!)', outgoingEdges: [], incomingEdges: [1] },
+                { id: 3, x: 100, y: 100, radius: DEFAULT_NODE_RADIUS, text: 'Sub-topic B\n(Wheel on me!)', outgoingEdges: [], incomingEdges: [1] }
+            ];
+            nextId = 4;
+            render();
+        }
+
+        // --- Coordinate Helpers ---
+        function getSVGPoint(clientX, clientY) {
+            const pt = svg.createSVGPoint();
+            pt.x = clientX;
+            pt.y = clientY;
+            return pt.matrixTransform(viewport.getScreenCTM().inverse());
+        }
+
+        function screenFromWorld(wx, wy) {
+            return {
+                x: wx * transform.scale + transform.x,
+                y: wy * transform.scale + transform.y
+            };
+        }
+
+        /**
+         * Truncates the text to a maximum number of lines and characters per line.
+         * @param {string} text The original text from the node.
+         * @returns {string} The truncated text.
+         */
+        function truncateText(text) {
+            const lines = (text || '').split(/\r?\n/);
+            const truncatedLines = lines.slice(0, MAX_LINES).map(line => {
+                if (line.length > MAX_CHARS_PER_LINE) {
+                    return line.substring(0, MAX_CHARS_PER_LINE) + '...';
+                }
+                return line;
+            });
+            return truncatedLines.join('\n');
+        }
+
+        /**
+         * Calculates the font size based on the node's radius, scaling it from a base size.
+         * @param {object} node The node object.
+         * @returns {number} The calculated font size.
+         */
+        function getFontSize(node) {
+            return BASE_FONT_SIZE * (node.radius / DEFAULT_NODE_RADIUS);
+        }
+
+        // --- Rendering ---
+        function render() {
+            // Clear layers
+            nodesLayer.innerHTML = '';
+            edgesLayer.innerHTML = '';
+            defs.innerHTML = ''; // Clear gradients
+
+            // Apply viewport transform
+            viewport.setAttribute('transform', `translate(${transform.x}, ${transform.y}) scale(${transform.scale})`);
+
+            const renderedEdges = new Set();
+            const nodeMap = new Map(nodes.map(n => [n.id, n]));
+            
+            // Render Edges
+            nodes.forEach(nodeA => {
+                nodeA.outgoingEdges.forEach(nodeBId => {
+                    const nodeB = nodeMap.get(nodeBId);
+                    if (!nodeB) return;
+
+                    const isBidirectional = nodeB.outgoingEdges.includes(nodeA.id);
+                    const edgeKey = isBidirectional ? `${Math.min(nodeA.id, nodeB.id)}-${Math.max(nodeA.id, nodeB.id)}` : `${nodeA.id}->${nodeB.id}`;
+                    
+                    if (renderedEdges.has(edgeKey)) return;
+                    renderedEdges.add(edgeKey);
+
+                    const edge = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    edge.setAttribute('x1', nodeA.x);
+                    edge.setAttribute('y1', nodeA.y);
+                    edge.setAttribute('x2', nodeB.x);
+                    edge.setAttribute('y2', nodeB.y);
+                    edge.setAttribute('stroke-width', '3');
+                    edge.setAttribute('vector-effect', 'non-scaling-stroke');
+
+                    if (isBidirectional) {
+                        edge.setAttribute('stroke', '#8b5cf6'); // Solid violet
+                    } else {
+                        // One-way gradient
+                        const gradId = `grad_${nodeA.id}_${nodeB.id}`;
+                        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+                        gradient.setAttribute('id', gradId);
+                        gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
+                        gradient.setAttribute('x1', nodeA.x);
+                        gradient.setAttribute('y1', nodeA.y);
+                        gradient.setAttribute('x2', nodeB.x);
+                        gradient.setAttribute('y2', nodeB.y);
+
+                        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+                        stop1.setAttribute('offset', '0%');
+                        stop1.setAttribute('stop-color', '#ef4444'); // Red
+                        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+                        stop2.setAttribute('offset', '100%');
+                        stop2.setAttribute('stop-color', '#3b82f6'); // Blue
+                        
+                        gradient.appendChild(stop1);
+                        gradient.appendChild(stop2);
+                        defs.appendChild(gradient);
+                        edge.setAttribute('stroke', `url(#${gradId})`);
+                    }
+                    edgesLayer.appendChild(edge);
+                });
+            });
+
+            // Render Nodes
+            nodes.forEach(node => {
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+                group.dataset.id = node.id;
+
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('r', node.radius);
+                
+                let circleClasses = 'fill-white stroke-gray-400 stroke-2 cursor-pointer';
+                // Apply selected node styling directly with Tailwind classes
+                if (node.id === selectedNodeId) {
+                    circleClasses += ' stroke-blue-500 stroke-[4px]';
+                }
+                circle.setAttribute('class', circleClasses);
+                circle.setAttribute('vector-effect', 'non-scaling-stroke');
+
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                const fontSize = getFontSize(node);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('dominant-baseline', 'middle');
+                label.setAttribute('pointer-events', 'none');
+                label.setAttribute('style', 'text-rendering:geometricPrecision');
+                label.setAttribute('font-size', fontSize);
+                
+                const truncatedText = truncateText(node.text);
+                const lines = truncatedText.split(/\r?\n/);
+                const lineHeight = fontSize * 1.2;
+                const dy0 = -((lines.length - 1) * lineHeight) / 2;
+
+                lines.forEach((line, idx) => {
+                    const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+                    tspan.setAttribute('x', '0');
+                    tspan.setAttribute('dy', idx === 0 ? dy0 : lineHeight);
+                    tspan.textContent = line || ' ';
+                    label.appendChild(tspan);
+                });
+
+                group.appendChild(circle);
+                group.appendChild(label);
+                nodesLayer.appendChild(group);
+            });
+        }
+        
+        function updateToolbar() {
+            if (selectedNodeId !== null) {
+                const node = nodes.find(n => n.id === selectedNodeId);
+                textEditor.value = node ? node.text : '';
+                textEditor.disabled = false;
+                deleteNodeBtn.disabled = false;
+            } else {
+                textEditor.value = '';
+                textEditor.disabled = true;
+                deleteNodeBtn.disabled = true;
+            }
+        }
+
+        // --- Interaction Handlers ---
+        svg.addEventListener('mousedown', e => {
+            if (e.button !== 0) {
+                return;
+            }
+
+            const targetNodeGroup = e.target.closest('g[data-id]');
+            if (targetNodeGroup) {
+                const nodeId = parseInt(targetNodeGroup.dataset.id, 10);
+                selectedNodeId = nodeId;
+                isDraggingNode = true;
+                const worldPoint = getSVGPoint(e.clientX, e.clientY);
+                const node = nodes.find(n => n.id === nodeId);
+                nodeDragStart.x = worldPoint.x - node.x;
+                nodeDragStart.y = worldPoint.y - node.y;
+                dragStart = { x: e.clientX, y: e.clientY };
+                updateToolbar();
+                render();
+            } else {
+                if (selectedNodeId !== null) {
+                    selectedNodeId = null;
+                    updateToolbar();
+                    render();
+                }
+                isPanning = true;
+                dragStart = { x: e.clientX, y: e.clientY };
+            }
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (isPanning) {
+                const dx = e.clientX - dragStart.x;
+                const dy = e.clientY - dragStart.y;
+                transform.x += dx;
+                transform.y += dy;
+                dragStart = { x: e.clientX, y: e.clientY };
+                render();
+            } else if (isDraggingNode) {
+                const dist = Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y);
+                if (dist > DRAG_THRESHOLD / transform.scale) {
+                    const node = nodes.find(n => n.id === selectedNodeId);
+                    if (node) {
+                        const worldPoint = getSVGPoint(e.clientX, e.clientY);
+                        node.x = worldPoint.x - nodeDragStart.x;
+                        node.y = worldPoint.y - nodeDragStart.y;
+                        render();
+                    }
+                }
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isPanning = false;
+            isDraggingNode = false;
+        });
+
+        svg.addEventListener('wheel', e => {
+            e.preventDefault();
+            const scaleAmount = e.deltaY < 0 ? 1.1 : 0.9;
+            
+            if (selectedNodeId !== null) {
+                const node = nodes.find(n => n.id === selectedNodeId);
+                if (node) {
+                    node.radius *= scaleAmount;
+                    render();
+                }
+            } else {
+                const screenX = e.clientX;
+                const screenY = e.clientY;
+                const worldPoint = getSVGPoint(screenX, screenY);
+                const newScale = transform.scale * scaleAmount;
+                transform.x = screenX - worldPoint.x * newScale;
+                transform.y = screenY - worldPoint.y * newScale;
+                transform.scale = newScale;
+                render();
+            }
+        }, { passive: false });
+
+        svg.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            const targetNodeGroup = e.target.closest('g[data-id]');
+
+            if (selectedNodeId === null) {
+                return;
+            }
+
+            if (targetNodeGroup) {
+                const targetId = parseInt(targetNodeGroup.dataset.id, 10);
+                if (targetId === selectedNodeId) return;
+
+                const selectedNode = nodes.find(n => n.id === selectedNodeId);
+                const targetNode = nodes.find(n => n.id === targetId);
+                if (!selectedNode || !targetNode) return;
+
+                const edgeIndex = selectedNode.outgoingEdges.indexOf(targetId);
+                if (edgeIndex > -1) {
+                    selectedNode.outgoingEdges.splice(edgeIndex, 1);
+                    const incomingIndex = targetNode.incomingEdges.indexOf(selectedNodeId);
+                    if (incomingIndex > -1) {
+                        targetNode.incomingEdges.splice(incomingIndex, 1);
+                    }
+                } else {
+                    selectedNode.outgoingEdges.push(targetId);
+                    targetNode.incomingEdges.push(selectedNodeId);
+                }
+                render();
+            }
+        });
+        
+        // --- Toolbar Handlers ---
+        addNodeBtn.addEventListener('click', () => {
+            const screenCenterX = window.innerWidth / 2;
+            const screenCenterY = window.innerHeight / 2;
+            const worldX = (screenCenterX - transform.x) / transform.scale;
+            const worldY = (screenCenterY - transform.y) / transform.scale;
+
+            const newNode = {
+                id: nextId++,
+                x: worldX,
+                y: worldY,
+                radius: DEFAULT_NODE_RADIUS / Math.max(1e-9, transform.scale),
+                text: 'New Node',
+                outgoingEdges: [],
+                incomingEdges: []
+            };
+            nodes.push(newNode);
+            selectedNodeId = newNode.id;
+            updateToolbar();
+            render();
+        });
+	let deleteSelectedNode = () => {
+            if (selectedNodeId === null) return;
+
+            nodes = nodes.filter(n => n.id !== selectedNodeId);
+
+            nodes.forEach(node => {
+                node.outgoingEdges = node.outgoingEdges.filter(edgeId => edgeId !== selectedNodeId);
+                node.incomingEdges = node.incomingEdges.filter(edgeId => edgeId !== selectedNodeId);
+            });
+
+            selectedNodeId = null;
+            updateToolbar();
+            render();
+        }
+
+        deleteNodeBtn.addEventListener('click', deleteSelectedNode);
+
+        textEditor.addEventListener('input', () => {
+            if (selectedNodeId !== null) {
+                const node = nodes.find(n => n.id === selectedNodeId);
+                if (node) {
+                    node.text = textEditor.value;
+                    render();
+                }
+            }
+        });
+        
+        helpBtn.addEventListener('click', () => {
+            helpModal.classList.toggle('hidden');
+        });
+
+        // --- Serialization ---
+        exportBtn.addEventListener('click', () => {
+            const data = {
+                version: 1,
+                meta: { exportedAt: new Date().toISOString() },
+                transform,
+                nextId,
+                nodes
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "mindmap.json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        });
+
+        importFile.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const imported = JSON.parse(event.target.result);
+                    
+                    if (imported.version !== 1 || !Array.isArray(imported.nodes)) {
+                        throw new Error("Invalid or unsupported file format.");
+                    }
+                    
+                    imported.nodes.forEach(node => {
+                        node.outgoingEdges = (node.outgoingEdges || []).map(Number);
+                        node.incomingEdges = (node.incomingEdges || []).map(Number);
+                    });
+
+                    nodes = imported.nodes;
+                    
+                    if (imported.transform && typeof imported.transform.x === 'number') {
+                        transform = imported.transform;
+                    }
+
+                    if (imported.nextId) {
+                        nextId = parseInt(imported.nextId, 10);
+                    } else {
+                        nextId = Math.max(0, ...nodes.map(n => n.id)) + 1;
+                    }
+
+                    selectedNodeId = null;
+                    updateToolbar();
+                    render();
+                } catch (err) {
+                    alert('Error importing file: ' + err.message);
+                } finally {
+                    importFile.value = '';
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // --- Initial Load ---
+        loadInitialData();
+        updateToolbar();
+        
+    </script>
+</body>
+</html>
