@@ -86,8 +86,37 @@
             opacity: 1;
             /* Show on hover */
         }
+        
+        /* --- Styles for Delete Button --- */
+        .delete-color-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 20px;
+            height: 20px;
+            background-color: #ef4444; /* red-500 */
+            color: white;
+            border-radius: 50%;
+            border: 1px solid white;
+            font-size: 14px;
+            line-height: 18px; /* Adjust for vertical centering */
+            text-align: center;
+            font-weight: bold;
+            cursor: pointer;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: all 0.2s ease;
+            z-index: 20; /* Make sure it's above other elements */
+        }
 
-        /* --- End New Palette Styling --- */
+        .palette-swatch:hover .delete-color-btn {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .delete-color-btn:hover {
+            background-color: #dc2626; /* red-600 */
+        }
 
 
         #analysisTableContainer {
@@ -145,8 +174,8 @@
             /* indigo-50 */
         }
 
-        /* Pixel art rendering for canvases */
-        canvas {
+        /* Pixel art rendering for canvases and images */
+        canvas, img {
             image-rendering: optimizeSpeed;
             image-rendering: -moz-crisp-edges;
             image-rendering: -webkit-optimize-contrast;
@@ -227,7 +256,10 @@
             <div>
                 <h2 class="text-xl font-semibold text-center mb-4">Quantized Image <span id="quantizedImageSize"
                         class="text-base text-gray-500 font-normal"></span></h2>
-                <canvas id="quantizedCanvas" class="w-full h-auto rounded-lg shadow-md border border-gray-200"></canvas>
+                <div class="relative">
+                    <canvas id="quantizedCanvas" class="w-full h-auto rounded-lg shadow-md border border-gray-200 hidden"></canvas>
+                    <img id="quantizedImage" class="w-full h-auto rounded-lg shadow-md border border-gray-200" alt="Quantized Image Output">
+                </div>
                 <!-- PSNR (Quality) widget moved here -->
                 <div class="mt-4 bg-gray-50 p-4 rounded-lg shadow-sm">
                     <h4 class="font-semibold mb-2 text-gray-800">Current Quality</h4>
@@ -257,7 +289,7 @@
                         <h4 class="font-semibold text-gray-800">Current Palette</h4>
                         <button id="exportPaletteBtn"
                             class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                            disabled>Export</button>
+                            disabled>Export Palette</button>
                     </div>
                     <div id="paletteContainer"
                         class="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-2 bg-gray-50 p-4 rounded-lg">
@@ -353,8 +385,9 @@
                 class="flex-1 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-transform transform hover:scale-105">Cancel</button>
         </div>
     </div>
-
-
+    
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
     <script>
         // --- DOM Element References ---
         const imageUpload = document.getElementById('imageUpload');
@@ -362,6 +395,7 @@
         const sliderValueEl = document.getElementById('sliderValue');
         const originalCanvas = document.getElementById('originalCanvas');
         const quantizedCanvas = document.getElementById('quantizedCanvas');
+        const quantizedImage = document.getElementById('quantizedImage');
         const statusEl = document.getElementById('status');
         const resultContainer = document.getElementById('resultContainer');
         const fileNameEl = document.getElementById('fileName');
@@ -389,13 +423,14 @@
         let currentPalette = [];
         let debounceTimer;
         let currentImageFile = null;
-        let isCustomPaletteActive = false; // New state variable
+        let isCustomPaletteActive = false;
+        let currentObjectUrl = null;
 
         // --- State variables for color editing ---
         let currentQuantizedImageData = null;
         let originalColorForEditing = null;
-        let latestPreviewColor = null;      // Used to store the most recent preview color
-        let preEditImageData = null;        // Stores a snapshot of image data before editing
+        let latestPreviewColor = null;
+        let preEditImageData = null;
         let currentEditedSwatch = null;
 
         // --- Custom Color Picker DOM Elements ---
@@ -474,10 +509,9 @@
                     analysisContainer.classList.remove('hidden');
                     fullAnalysisResults.classList.add('hidden');
 
-                    // Enable/disable controls based on image presence
                     setControlsEnabled(true);
-                    isCustomPaletteActive = false; // Reset custom palette state
-                    paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
+                    isCustomPaletteActive = false; 
+                    paletteFileNameEl.textContent = 'Upload Palette (TXT)...';
                     updateStatus('Image loaded. Ready to quantize.');
                     startQuantization();
                 };
@@ -521,7 +555,7 @@
         function handleSliderChange() {
             sliderValueEl.textContent = colorSlider.value;
             if (originalImageData) {
-                startQuantization(); // Trigger quantization immediately
+                startQuantization();
             }
         }
 
@@ -531,20 +565,19 @@
         }
 
         function setControlsEnabled(enabled) {
-            // All controls related to image processing should be enabled if an image is loaded
             colorSlider.disabled = !enabled;
             algorithmSelect.disabled = !enabled;
             runFullAnalysisBtn.disabled = !enabled;
             exportPaletteBtn.disabled = !enabled;
             ditheringCheckbox.disabled = !enabled;
-            paletteUpload.disabled = !enabled; // Enable palette upload if image is loaded
+            paletteUpload.disabled = !enabled;
         }
 
         function startQuantization() {
             if (!originalImageData) return;
 
-            isCustomPaletteActive = false; // When an algorithm runs, custom palette is no longer active
-            paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
+            isCustomPaletteActive = false;
+            paletteFileNameEl.textContent = 'Upload Palette (TXT)...';
 
             const k = parseInt(colorSlider.value, 10);
             const algorithm = algorithmSelect.value;
@@ -568,8 +601,8 @@
                         finalImageData = mapPixelsToPaletteKMeans(originalImageData, getUniquePalette(paletteResult.palette));
                     } else if (algorithm === 'octree') {
                         const octreeOutput = quantizeOctree(originalImageData, k);
-                        paletteResult = { palette: octreeOutput.palette }; // Extract palette
-                        finalImageData = octreeOutput.quantizedData; // Octree already provides mapped image
+                        paletteResult = { palette: octreeOutput.palette };
+                        finalImageData = octreeOutput.quantizedData;
                     } else {
                         throw new Error('Unknown quantization algorithm selected.');
                     }
@@ -579,22 +612,12 @@
 
                     if (useDithering) {
                         updateStatus('Applying dithering...');
-                        // Create a fresh ImageData object for dithering to avoid modifying original or already quantized data
                         const ditheredImageData = new ImageData(new Uint8ClampedArray(originalImageData.data), originalImageData.width, originalImageData.height);
                         applyErrorDiffusion(ditheredImageData, uniquePalette);
                         finalImageData = ditheredImageData;
                     }
 
-                    currentQuantizedImageData = finalImageData;
-                    quantizedCtx.putImageData(currentQuantizedImageData, 0, 0);
-
-                    const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
-                    psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
-
-                    const quantizedDataUrl = quantizedCanvas.toDataURL('image/png');
-                    const base64Data = quantizedDataUrl.split(',')[1];
-                    quantizedImageSizeEl.textContent = `(${formatBytes(base64Data.length * 0.75)})`;
-
+                    updateQuantizedImageDetails(finalImageData);
                     displayPalette(currentPalette);
                     updateStatus(`Image quantized to ${currentPalette.length} unique colors.`);
                 } catch (error) {
@@ -602,6 +625,33 @@
                     updateStatus('An error occurred during quantization: ' + error.message, true);
                 }
             }, 10);
+        }
+        
+        function updateQuantizedImageDetails(quantizedImageData) {
+            currentQuantizedImageData = quantizedImageData;
+
+            const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
+            psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
+            
+            let indexedPngBuffer;
+            try {
+                indexedPngBuffer = UPNG.encode([quantizedImageData.data.buffer], quantizedImageData.width, quantizedImageData.height, currentPalette.length);
+            } catch (e) {
+                console.error("PNG Encoding Error:", e);
+                updateStatus("Error creating indexed PNG.", true);
+                quantizedImageSizeEl.textContent = `(Error)`;
+                return;
+            }
+            
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+            }
+            const blob = new Blob([indexedPngBuffer], { type: 'image/png' });
+            currentObjectUrl = URL.createObjectURL(blob);
+            quantizedImage.src = currentObjectUrl;
+
+            quantizedImageSizeEl.textContent = `(${formatBytes(indexedPngBuffer.byteLength)})`;
+            exportPaletteBtn.disabled = false;
         }
 
         function getUniquePalette(palette) {
@@ -727,279 +777,65 @@
             return { palette: colorMap };
         }
 
-        /**
-         * MinHeap class for managing reducible nodes in Octree quantization.
-         * Nodes are ordered by their pixelCount (smallest first).
-         */
         class MinHeap {
-            constructor() {
-                this.heap = [];
-            }
-
-            isEmpty() {
-                return this.heap.length === 0;
-            }
-
-            push(node) {
-                this.heap.push(node);
-                this.bubbleUp(this.heap.length - 1);
-            }
-
-            pop() {
-                if (this.isEmpty()) return null;
-                const min = this.heap[0];
-                const last = this.heap.pop();
-                if (this.heap.length > 0) {
-                    this.heap[0] = last;
-                    this.sinkDown(0);
-                }
-                return min;
-            }
-
-            bubbleUp(index) {
-                while (index > 0) {
-                    const parentIndex = Math.floor((index - 1) / 2);
-                    if (this.heap[parentIndex].pixelCount > this.heap[index].pixelCount) {
-                        [this.heap[parentIndex], this.heap[index]] = [this.heap[index], this.heap[parentIndex]];
-                        index = parentIndex;
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            sinkDown(index) {
-                const leftChildIndex = 2 * index + 1;
-                const rightChildIndex = 2 * index + 2;
-                let smallestIndex = index;
-
-                if (leftChildIndex < this.heap.length && this.heap[leftChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) {
-                    smallestIndex = leftChildIndex;
-                }
-
-                if (rightChildIndex < this.heap.length && this.heap[rightChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) {
-                    smallestIndex = rightChildIndex;
-                }
-
-                if (smallestIndex !== index) {
-                    [this.heap[smallestIndex], this.heap[index]] = [this.heap[index], this.heap[smallestIndex]];
-                    this.sinkDown(smallestIndex);
-                }
-            }
+            constructor() { this.heap = []; }
+            isEmpty() { return this.heap.length === 0; }
+            push(node) { this.heap.push(node); this.bubbleUp(this.heap.length - 1); }
+            pop() { if (this.isEmpty()) return null; const min = this.heap[0]; const last = this.heap.pop(); if (this.heap.length > 0) { this.heap[0] = last; this.sinkDown(0); } return min; }
+            bubbleUp(index) { while (index > 0) { const parentIndex = Math.floor((index - 1) / 2); if (this.heap[parentIndex].pixelCount > this.heap[index].pixelCount) { [this.heap[parentIndex], this.heap[index]] = [this.heap[index], this.heap[parentIndex]]; index = parentIndex; } else { break; } } }
+            sinkDown(index) { const leftChildIndex = 2 * index + 1; const rightChildIndex = 2 * index + 2; let smallestIndex = index; if (leftChildIndex < this.heap.length && this.heap[leftChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) { smallestIndex = leftChildIndex; } if (rightChildIndex < this.heap.length && this.heap[rightChildIndex].pixelCount < this.heap[smallestIndex].pixelCount) { smallestIndex = rightChildIndex; } if (smallestIndex !== index) { [this.heap[smallestIndex], this.heap[index]] = [this.heap[index], this.heap[smallestIndex]]; this.sinkDown(smallestIndex); } }
         }
 
-        /**
-         * OctreeNode class for Octree quantization.
-         */
         class OctreeNode {
-            constructor(level, parent) {
-                this.children = new Array(8).fill(null);
-                this.isLeaf = true;
-                this.pixelCount = 0;
-                this.redSum = 0;
-                this.greenSum = 0;
-                this.blueSum = 0;
-                this.paletteIndex = -1;
-                this.level = level;
-                this.parent = parent;
-            }
-
-            /**
-             * Corrected method to add a pixel to the octree. It now handles
-             * splitting leaf nodes into internal nodes correctly.
-             */
-            addPixel(pixel, level, reducibleHeaps) {
-                // If this node is not a leaf, pass the pixel down to the correct child.
-                if (!this.isLeaf) {
-                    const childIndex = getOctreeChildIndex(pixel, level);
-                    if (!this.children[childIndex]) {
-                        this.children[childIndex] = new OctreeNode(level + 1, this);
-                    }
-                    this.children[childIndex].addPixel(pixel, level + 1, reducibleHeaps);
-                    return;
-                }
-
-                // If this is a leaf node, it needs to be split, unless at max depth.
-                // Level 7 is the last level where we can create children.
-                if (level === 7) {
-                    this.pixelCount++;
-                    this.redSum += pixel[0];
-                    this.greenSum += pixel[1];
-                    this.blueSum += pixel[2];
-                    return;
-                }
-
-                // Redistribute the pixel(s) this leaf already holds.
-                if (this.pixelCount > 0) {
-                    const oldColor = [
-                        this.redSum / this.pixelCount,
-                        this.greenSum / this.pixelCount,
-                        this.blueSum / this.pixelCount
-                    ];
-                    const oldIndex = getOctreeChildIndex(oldColor, level);
-
-                    this.children[oldIndex] = new OctreeNode(level + 1, this);
-                    this.children[oldIndex].pixelCount = this.pixelCount;
-                    this.children[oldIndex].redSum = this.redSum;
-                    this.children[oldIndex].greenSum = this.greenSum;
-                    this.children[oldIndex].blueSum = this.blueSum;
-                }
-
-                // This node is now an internal node.
-                this.isLeaf = false;
-                this.pixelCount = 0;
-                this.redSum = 0;
-                this.greenSum = 0;
-                this.blueSum = 0;
-
-                // Add this node to the reducible heap for its level
-                reducibleHeaps[this.level].push(this);
-
-                // Add the new pixel to its correct child.
-                const newIndex = getOctreeChildIndex(pixel, level);
-                if (!this.children[newIndex]) {
-                    this.children[newIndex] = new OctreeNode(level + 1, this);
-                }
-                this.children[newIndex].addPixel(pixel, level + 1, reducibleHeaps);
-            }
-
-            mergeChildren() {
-                if (this.isLeaf) return;
-                for (let i = 0; i < 8; i++) {
-                    const child = this.children[i];
-                    if (child) {
-                        this.redSum += child.redSum;
-                        this.greenSum += child.greenSum;
-                        this.blueSum += child.blueSum;
-                        this.pixelCount += child.pixelCount;
-                        this.children[i] = null;
-                    }
-                }
-                this.isLeaf = true;
-            }
-
-            getLeaves(leaves) {
-                if (this.isLeaf) {
-                    if (this.pixelCount) leaves.push(this);
-                } else {
-                    for (let i = 0; i < 8; i++) {
-                        if (this.children[i]) this.children[i].getLeaves(leaves);
-                    }
-                }
-            }
-
-            getAverageColor() {
-                if (this.pixelCount === 0) return [0, 0, 0];
-                return [
-                    Math.round(this.redSum / this.pixelCount),
-                    Math.round(this.greenSum / this.pixelCount),
-                    Math.round(this.blueSum / this.pixelCount)
-                ];
-            }
+            constructor(level, parent) { this.children = new Array(8).fill(null); this.isLeaf = true; this.pixelCount = 0; this.redSum = 0; this.greenSum = 0; this.blueSum = 0; this.paletteIndex = -1; this.level = level; this.parent = parent; }
+            addPixel(pixel, level, reducibleHeaps) { if (!this.isLeaf) { const childIndex = getOctreeChildIndex(pixel, level); if (!this.children[childIndex]) { this.children[childIndex] = new OctreeNode(level + 1, this); } this.children[childIndex].addPixel(pixel, level + 1, reducibleHeaps); return; } if (level === 7) { this.pixelCount++; this.redSum += pixel[0]; this.greenSum += pixel[1]; this.blueSum += pixel[2]; return; } if (this.pixelCount > 0) { const oldColor = [this.redSum / this.pixelCount, this.greenSum / this.pixelCount, this.blueSum / this.pixelCount]; const oldIndex = getOctreeChildIndex(oldColor, level); this.children[oldIndex] = new OctreeNode(level + 1, this); this.children[oldIndex].pixelCount = this.pixelCount; this.children[oldIndex].redSum = this.redSum; this.children[oldIndex].greenSum = this.greenSum; this.children[oldIndex].blueSum = this.blueSum; } this.isLeaf = false; this.pixelCount = 0; this.redSum = 0; this.greenSum = 0; this.blueSum = 0; reducibleHeaps[this.level].push(this); const newIndex = getOctreeChildIndex(pixel, level); if (!this.children[newIndex]) { this.children[newIndex] = new OctreeNode(level + 1, this); } this.children[newIndex].addPixel(pixel, level + 1, reducibleHeaps); }
+            mergeChildren() { if (this.isLeaf) return; for (let i = 0; i < 8; i++) { const child = this.children[i]; if (child) { this.redSum += child.redSum; this.greenSum += child.greenSum; this.blueSum += child.blueSum; this.pixelCount += child.pixelCount; this.children[i] = null; } } this.isLeaf = true; }
+            getLeaves(leaves) { if (this.isLeaf) { if (this.pixelCount) leaves.push(this); } else { for (let i = 0; i < 8; i++) { if (this.children[i]) this.children[i].getLeaves(leaves); } } }
+            getAverageColor() { if (this.pixelCount === 0) return [0, 0, 0]; return [Math.round(this.redSum / this.pixelCount), Math.round(this.greenSum / this.pixelCount), Math.round(this.blueSum / this.pixelCount)]; }
         }
 
-        function getOctreeChildIndex(pixel, level) {
-            let index = 0;
-            const bit = 7 - level;
-            if ((pixel[0] >> bit) & 1) index |= 4;
-            if ((pixel[1] >> bit) & 1) index |= 2;
-            if ((pixel[2] >> bit) & 1) index |= 1;
-            return index;
-        }
+        function getOctreeChildIndex(pixel, level) { let index = 0; const bit = 7 - level; if ((pixel[0] >> bit) & 1) index |= 4; if ((pixel[1] >> bit) & 1) index |= 2; if ((pixel[2] >> bit) & 1) index |= 1; return index; }
 
-        /**
-         * Quantizes an image using the Octree algorithm with heap-based reduction.
-         * @param {ImageData} imageData
-         * @param {number} k
-         * @returns {{quantizedData: ImageData, palette: number[][]}}
-         */
         function quantizeOctree(imageData, k) {
-            const pixels = getPixelsRGB(imageData); // Use generic RGB pixel extractor
-
+            const pixels = getPixelsRGB(imageData);
             if (!pixels.length) return { quantizedData: new ImageData(imageData.width, imageData.height), palette: [] };
-
             const root = new OctreeNode(0, null);
-            // Create 8 heaps, one for each level (0-7)
             const reducibleHeaps = Array.from({ length: 8 }, () => new MinHeap());
-
-            for (const pixel of pixels) {
-                root.addPixel(pixel, 0, reducibleHeaps);
-            }
-
+            for (const pixel of pixels) { root.addPixel(pixel, 0, reducibleHeaps); }
             const leaves = [];
             root.getLeaves(leaves);
             let leafCount = leaves.length;
-
             if (leafCount > k) {
-                let level = 7; // Start from the deepest level
+                let level = 7;
                 while (leafCount > k && level >= 0) {
-                    // While there are nodes at this level that can be reduced and we still need to reduce colors
                     while (!reducibleHeaps[level].isEmpty() && leafCount > k) {
                         const node = reducibleHeaps[level].pop();
-                        if (!node) continue; // Should not happen with isEmpty check
-
-                        // Before merging, count how many leaves this node's children contribute
+                        if (!node) continue;
                         const leavesToRemove = [];
-                        node.getLeaves(leavesToRemove); // This will collect all leaves under this node
+                        node.getLeaves(leavesToRemove);
                         const removedLeafCount = leavesToRemove.length;
-
-                        node.mergeChildren(); // Merge children, making this node a leaf
-
-                        // Update the leaf count: subtract the removed children's leaves, add 1 for the new merged leaf
+                        node.mergeChildren();
                         leafCount = leafCount - removedLeafCount + 1;
-
-                        // If the node's parent is not a leaf and exists, add the parent to its reducible heap
-                        // This handles cases where merging a child makes a parent reducible
-                        if (node.parent && !node.parent.isLeaf && node.parent.level > 0) {
-                            // Check if the parent is already in its heap to avoid duplicates
-                            // (MinHeap doesn't have a direct 'contains' check, but for this context,
-                            // we can assume it's not if it was just made reducible)
-                            reducibleHeaps[node.parent.level].push(node.parent);
-                        }
+                        if (node.parent && !node.parent.isLeaf && node.parent.level > 0) { reducibleHeaps[node.parent.level].push(node.parent); }
                     }
-                    level--; // Move to the next shallower level
+                    level--;
                 }
             }
-
             const finalLeaves = [];
-            root.getLeaves(finalLeaves); // Collect all leaves after reduction
+            root.getLeaves(finalLeaves);
             const palette = finalLeaves.map(l => l.getAverageColor());
-
-            // Map pixels to the new palette using the Octree for efficient lookup
             const newImageData = new ImageData(imageData.width, imageData.height);
             const originalData = imageData.data;
             const newData = newImageData.data;
-
             for (let i = 0; i < originalData.length; i += 4) {
                 const alpha = originalData[i + 3];
-                if (alpha < 128) { // Preserve transparent pixels
-                    newData[i] = originalData[i];
-                    newData[i + 1] = originalData[i + 1];
-                    newData[i + 2] = originalData[i + 2];
-                    newData[i + 3] = alpha;
-                    continue;
-                }
-
+                if (alpha < 128) { newData[i] = originalData[i]; newData[i + 1] = originalData[i + 1]; newData[i + 2] = originalData[i + 2]; newData[i + 3] = alpha; continue; }
                 const pixel = [originalData[i], originalData[i + 1], originalData[i + 2]];
                 let currentNode = root;
-                // Traverse the octree to find the closest leaf node
-                for (let level = 0; level <= 7; level++) { // Max level is 7 for 8-bit color
-                    if (currentNode.isLeaf) break; // Found the leaf or merged node
-                    const index = getOctreeChildIndex(pixel, level);
-                    if (!currentNode.children[index]) {
-                        // If path doesn't exist (e.g., due to reduction), use the current node's average color
-                        break;
-                    }
-                    currentNode = currentNode.children[index];
-                }
-
+                for (let level = 0; level <= 7; level++) { if (currentNode.isLeaf) break; const index = getOctreeChildIndex(pixel, level); if (!currentNode.children[index]) { break; } currentNode = currentNode.children[index]; }
                 const closestColor = currentNode.getAverageColor();
-                newData[i] = closestColor[0];
-                newData[i + 1] = closestColor[1];
-                newData[i + 2] = closestColor[2];
-                newData[i + 3] = alpha;
+                newData[i] = closestColor[0]; newData[i + 1] = closestColor[1]; newData[i + 2] = closestColor[2]; newData[i + 3] = alpha;
             }
-
             return { quantizedData: newImageData, palette };
         }
 
@@ -1036,11 +872,25 @@
                 swatch.dataset.r = r; swatch.dataset.g = g; swatch.dataset.b = b;
                 swatch.title = `Click to edit ${hex.toUpperCase()} (or right-click to copy)`;
                 swatch.innerHTML = `<span>${hex.toUpperCase()}</span>`;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-color-btn';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = `Remove color ${hex.toUpperCase()}`;
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeColorFromPalette(color);
+                });
+                swatch.appendChild(deleteBtn);
+
                 swatch.addEventListener('click', (event) => {
                     event.preventDefault();
+                    quantizedCanvas.classList.remove('hidden');
+                    quantizedImage.classList.add('hidden');
+                    quantizedCtx.putImageData(currentQuantizedImageData, 0, 0);
+
                     currentEditedSwatch = swatch;
                     originalColorForEditing = [parseInt(swatch.dataset.r), parseInt(swatch.dataset.g), parseInt(swatch.dataset.b)];
-                    // Save a snapshot of the image data before editing begins
                     preEditImageData = new ImageData(new Uint8ClampedArray(currentQuantizedImageData.data), currentQuantizedImageData.width, currentQuantizedImageData.height);
                     latestPreviewColor = [...originalColorForEditing];
                     const currentHex = rgbToHex(...originalColorForEditing);
@@ -1065,6 +915,51 @@
             });
         }
 
+        function removeColorFromPalette(colorToRemove) {
+            if (currentPalette.length <= 2) {
+                updateStatus('Cannot have fewer than 2 colors in the palette.', true);
+                return;
+            }
+
+            if (!originalImageData || !currentQuantizedImageData) {
+                updateStatus('Cannot remove color without a loaded image.', true);
+                return;
+            }
+
+            updateStatus(`Removing color ${rgbToHex(...colorToRemove)}...`);
+            
+            setTimeout(() => {
+                const colorToRemoveStr = JSON.stringify(colorToRemove);
+                const colorIndex = currentPalette.findIndex(p => JSON.stringify(p) === colorToRemoveStr);
+
+                if (colorIndex > -1) {
+                    currentPalette.splice(colorIndex, 1);
+
+                    const useDithering = ditheringCheckbox.checked;
+                    let remappedImageData;
+                    if (useDithering) {
+                        remappedImageData = new ImageData(new Uint8ClampedArray(originalImageData.data), originalImageData.width, originalImageData.height);
+                        applyErrorDiffusion(remappedImageData, currentPalette);
+                    } else {
+                        remappedImageData = mapPixelsToPaletteKMeans(originalImageData, currentPalette);
+                    }
+                    
+                    updateQuantizedImageDetails(remappedImageData);
+                    displayPalette(currentPalette);
+
+                    const newColorCount = currentPalette.length;
+                    sliderValueEl.textContent = newColorCount;
+                    if (!isCustomPaletteActive) {
+                       colorSlider.value = newColorCount;
+                    }
+
+                    updateStatus(`Color removed. New palette has ${currentPalette.length} colors.`);
+                } else {
+                    updateStatus('Could not find the color to remove.', true);
+                }
+            }, 10);
+        }
+
         function replaceColorInImageData(imageData, oldColor, newColor) {
             const data = imageData.data;
             const [oldR, oldG, oldB] = oldColor, [newR, newG, newB] = newColor;
@@ -1083,7 +978,6 @@
                 rgbTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
                 hslTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
                 hslTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
-                // Set native color picker value based on current preview color
                 nativeColorPickerInCustom.value = rgbToHex(...latestPreviewColor);
             } else if (tabName === 'hsl') {
                 rgbPanel.classList.add('hidden');
@@ -1092,7 +986,6 @@
                 hslTabBtn.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700');
                 rgbTabBtn.classList.remove('border-indigo-500', 'text-indigo-700');
                 rgbTabBtn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700');
-                // Set HSL sliders based on current preview color
                 const [h, s, l] = rgbToHsl(...latestPreviewColor);
                 hslH.value = h; hslS.value = s; hslL.value = l;
                 hslHValue.textContent = h; hslSValue.textContent = `${s}%`; hslLValue.textContent = `${l}%`;
@@ -1102,9 +995,7 @@
 
         function handleLivePreview(newColor) {
             if (!preEditImageData || !originalColorForEditing) return;
-            // Always work from a fresh copy of the pre-edit state.
             const tempImageData = new ImageData(new Uint8ClampedArray(preEditImageData.data), preEditImageData.width, preEditImageData.height);
-            // Always replace the *original* color with the *new* preview color.
             replaceColorInImageData(tempImageData, originalColorForEditing, newColor);
             quantizedCtx.putImageData(tempImageData, 0, 0);
             latestPreviewColor = newColor;
@@ -1116,15 +1007,18 @@
 
         function finalizeColorChange() {
             if (!originalColorForEditing || !latestPreviewColor) return;
-            // Apply the final color to the pre-edit snapshot and make it the new current state.
             replaceColorInImageData(preEditImageData, originalColorForEditing, latestPreviewColor);
-            currentQuantizedImageData = preEditImageData;
+            
             const oldColorStr = JSON.stringify(originalColorForEditing);
             const indexToUpdate = currentPalette.findIndex(p => JSON.stringify(p) === oldColorStr);
             if (indexToUpdate > -1) currentPalette[indexToUpdate] = latestPreviewColor;
+            
+            updateQuantizedImageDetails(preEditImageData);
             displayPalette(currentPalette);
-            const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
-            psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
+
+            quantizedCanvas.classList.add('hidden');
+            quantizedImage.classList.remove('hidden');
+
             updateStatus(`Color updated to ${rgbToHex(...latestPreviewColor)}.`, false);
             customColorPicker.classList.add('hidden');
             originalColorForEditing = null; latestPreviewColor = null; preEditImageData = null; currentEditedSwatch = null;
@@ -1132,8 +1026,10 @@
 
         function cancelColorChange() {
             if (!preEditImageData) return;
-            // Restore the canvas from the pre-edit state.
-            quantizedCtx.putImageData(preEditImageData, 0, 0);
+            
+            quantizedCanvas.classList.add('hidden');
+            quantizedImage.classList.remove('hidden');
+
             updateStatus('Color change cancelled.', false);
             customColorPicker.classList.add('hidden');
             originalColorForEditing = null; latestPreviewColor = null; preEditImageData = null; currentEditedSwatch = null;
@@ -1143,7 +1039,6 @@
         function hexToRgb(hex) {
             const hexValue = hex.startsWith('#') ? hex.slice(1) : hex;
             if (hexValue.length === 3) {
-                // Handle shorthand hex: #RGB -> #RRGGBB
                 const r = parseInt(hexValue[0] + hexValue[0], 16);
                 const g = parseInt(hexValue[1] + hexValue[1], 16);
                 const b = parseInt(hexValue[2] + hexValue[2], 16);
@@ -1154,7 +1049,7 @@
                 const b = parseInt(hexValue.slice(4, 6), 16);
                 return [r, g, b];
             }
-            return [0, 0, 0]; // Invalid hex
+            return [0, 0, 0];
         }
         function rgbToHsl(r, g, b) { r /= 255; g /= 255; b /= 255; const max = Math.max(r, g, b), min = Math.min(r, g, b); let h = 0, s, l = (max + min) / 2; if (max === min) { h = s = 0; } else { const d = max - min; s = l > 0.5 ? d / (2 - max - min) : d / (max + min); switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; case b: h = (r - g) / d + 4; break; } h /= 6; } return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)]; }
         function hslToRgb(h, s, l) { h /= 360; s /= 100; l /= 100; let r, g, b; if (s === 0) { r = g = b = l; } else { const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; }; const q = l < 0.5 ? l * (1 + s) : l + s - l * s; const p = 2 * l - q; r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3); } return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]; }
@@ -1182,9 +1077,8 @@
                 updateStatus('Please upload an image first.', true);
                 return;
             }
-            // Disable controls during full analysis
             setControlsEnabled(false);
-            runFullAnalysisBtn.disabled = true; // Keep this explicitly disabled until analysis is done
+            runFullAnalysisBtn.disabled = true;
 
             fullAnalysisResults.classList.remove('hidden');
             analysisTableBody.innerHTML = '';
@@ -1193,13 +1087,13 @@
             const algorithm = algorithmSelect.value;
             const useDithering = ditheringCheckbox.checked;
 
-            isCustomPaletteActive = false; // Full analysis uses algorithm, so custom palette is no longer active
-            paletteFileNameEl.textContent = 'Upload Palette (TXT)...'; // Reset palette file name display
+            isCustomPaletteActive = false;
+            paletteFileNameEl.textContent = 'Upload Palette (TXT)...';
 
 
             for (let k = 2; k <= maxColors; k++) {
                 updateStatus(`Analysis: Processing for ${k} colors...`);
-                await new Promise(resolve => setTimeout(resolve, 10)); // Allow UI to update
+                await new Promise(resolve => setTimeout(resolve, 10));
                 try {
                     let paletteResult;
                     let finalImageData;
@@ -1251,10 +1145,9 @@
                 }
             }
             updateStatus('Full analysis complete!');
-            setControlsEnabled(true); // Re-enable controls after analysis
+            setControlsEnabled(true);
         }
 
-        // --- Custom Palette Upload Functions ---
         function handlePaletteUpload(file) {
             if (!file || !file.type.startsWith('text/')) {
                 updateStatus('Please select a valid text file for the palette.', true);
@@ -1269,7 +1162,7 @@
                         updateStatus('No valid colors found in the palette file.', true);
                         return;
                     }
-                    applyCustomPalette(uploadedPalette); // No need for setCustomActive param, always true now
+                    applyCustomPalette(uploadedPalette);
                     updateStatus(`Custom palette with ${uploadedPalette.length} colors loaded.`);
                 } catch (error) {
                     console.error("Error parsing palette file:", error);
@@ -1277,8 +1170,6 @@
                 }
             };
             reader.readAsText(file);
-
-            // Crucial for allowing re-uploading the same file
             paletteUpload.value = '';
         }
 
@@ -1290,13 +1181,11 @@
                 if (!line) return;
 
                 let color = null;
-                // Try parsing as hex
                 if (line.startsWith('#')) {
                     color = hexToRgb(line);
-                } else if (line.length === 6 || line.length === 3) { // RRGGBB or RGB (shorthand) without #
+                } else if (line.length === 6 || line.length === 3) {
                     color = hexToRgb(line);
                 }
-                // Try parsing as RGB (e.g., "255,0,128")
                 else if (line.includes(',')) {
                     const parts = line.split(',').map(p => parseInt(p.trim(), 10));
                     if (parts.length === 3 && parts.every(p => !isNaN(p) && p >= 0 && p <= 255)) {
@@ -1313,14 +1202,14 @@
             return palette;
         }
 
-        function applyCustomPalette(palette) { // Removed setCustomActive param
+        function applyCustomPalette(palette) {
             if (!originalImageData) {
                 updateStatus('Please upload an image first to apply a palette.', true);
                 return;
             }
 
-            isCustomPaletteActive = true; // Always true when custom palette is applied
-            currentPalette = getUniquePalette(palette); // Ensure unique colors and correct format
+            isCustomPaletteActive = true;
+            currentPalette = getUniquePalette(palette);
 
             const useDithering = ditheringCheckbox.checked;
             let mappedImageData;
@@ -1333,27 +1222,17 @@
                 mappedImageData = mapPixelsToPaletteKMeans(originalImageData, currentPalette);
             }
 
-            currentQuantizedImageData = mappedImageData;
-            quantizedCtx.putImageData(currentQuantizedImageData, 0, 0);
-
-            const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
-            psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
-
-            const quantizedDataUrl = quantizedCanvas.toDataURL('image/png');
-            const base64Data = quantizedDataUrl.split(',')[1];
-            quantizedImageSizeEl.textContent = `(${formatBytes(base64Data.length * 0.75)})`;
-
+            updateQuantizedImageDetails(mappedImageData);
             displayPalette(currentPalette);
-            // No need to call updatePaletteControlsState here, as controls are always enabled if image is loaded
             updateStatus(`Image mapped to custom palette with ${currentPalette.length} unique colors.`);
         }
 
-        // Initial state update on load (only enable if image is present)
         document.addEventListener('DOMContentLoaded', () => {
-            setControlsEnabled(false); // Initially disable all controls until an image is loaded
+            setControlsEnabled(false);
         });
 
     </script>
 </body>
 
 </html>
+
