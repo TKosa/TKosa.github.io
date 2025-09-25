@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tanks2</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { background: #fff; }
+    /* Let JS control canvas CSS size for aspect-preserving letterboxing */
+    #myCanvas { display: block; }
+    /* Simple HUD scoreboard overlay aligned to canvas top */
+    .hud-scoreboard { position: fixed; z-index: 10; left: 0; top: 0; width: 0; height: 0; pointer-events: auto; }
+    /* Disable clicks by default, re-enable for specific controls */
+    .hud-scoreboard * { pointer-events: none; }
+    .hud-scoreboard.hidden { display: none; }
+    .hud-scoreboard .sb-inner { position: relative; width: 100%; height: 100%; box-sizing: border-box; background: rgba(160,160,160,0.92); border: 1px solid #808080; border-radius: 6px; padding: 6px 10px; display: flex; align-items: flex-end; justify-content: space-between; font-family: Verdana, system-ui, sans-serif; }
+    .hud-scoreboard .sb-player { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; color: #111; font-weight: 600; font-size: 18px; }
+    .hud-scoreboard .sb-row { display: flex; align-items: center; gap: 6px; }
+    .hud-scoreboard .sb-tank { width: 18px; height: 18px; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 1px 0 rgba(0,0,0,0.35)); }
+    .hud-scoreboard .sb-icon { width: 18px; height: 18px; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 1px 0 rgba(0,0,0,0.5)); transform: translateX(8px); }
+    .hud-scoreboard .sb-network { position: absolute; right: 8px; top: 6px; pointer-events: auto; cursor: pointer; user-select: none; }
+    .hud-scoreboard .sb-network, .hud-scoreboard .sb-network * { pointer-events: auto; }
+    .hud-scoreboard .sb-network img { width: 22px; height: 22px; display: block; }
+    .hud-scoreboard .sb-test { position: absolute; right: 38px; top: 6px; height: 22px; padding: 0 6px; font-size: 12px; border: 1px solid #2b5b8e; background: #133055; color: #e8f2ff; border-radius: 4px; cursor: pointer; }
+    .hud-scoreboard .sb-test:hover { background: #1a3b66; }
+    .hud-scoreboard .sb-test, .hud-scoreboard .sb-test * { pointer-events: auto; }
+  </style>
+  <!-- PeerJS (global UMD build) -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script type="module" src="bundle.js"></script>
+</head>
+<body>
+  <div id="app-shell">
+    <div id="game-slot">
+      <canvas id="myCanvas" width="1280" height="720"></canvas>
+    </div>
+    <div id="networking-chat-panel" class="net-panel hidden">
+      <div id="chat-resize-handle" aria-hidden="true"></div>
+      <div id="chat">
+        <div id="chat-messages"></div>
+        <div id="chat-input">
+          <input id="chat-message-input" type="text" placeholder="Type a message" />
+          <button id="chat-send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Pregame UI overlay (HTML panels instead of canvas drawing) -->
+  <style>
+    .pregame-overlay { position: fixed; z-index: 20; left: 0; top: 0; width: 0; height: 0; pointer-events: auto; }
+    .pregame-overlay.hidden { display: none; }
+    .pg-inner { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; transform-origin: 0 0; font-family: system-ui, sans-serif; color: var(--net-text); }
+    /* Panels styled like net-panel */
+    .pg-panel { position: absolute; height: 100%; box-sizing: border-box; background: #000; border: 1px solid var(--net-border); box-shadow: 0 0 0 1px var(--net-border), 0 8px 30px var(--net-glow), inset 0 0 40px rgba(0,0,0,0.35); border-radius: 10px; overflow: hidden; }
+    .pg-panel-inner { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--net-bg); border-radius: 8px; }
+    /* Apply inner insets via padding to mimic borders */
+    .pg-panel-inner[data-inset] { padding: var(--pg-inset-n,0) var(--pg-inset-e,0) var(--pg-inset-s,0) var(--pg-inset-w,0); }
+    /* Buttons styled like net-controls buttons */
+    .pg-btn { position: absolute; height: 28px; box-sizing: border-box; padding: 0 12px; background: var(--net-btn-bg); color: var(--net-text); border: 1px solid var(--net-btn-border); border-radius: 6px; cursor: pointer; font: 13px/26px system-ui, sans-serif; text-align: center; }
+    .pg-btn:hover { background: var(--net-btn-hover); }
+    /* Labels for control mapping look like buttons for consistency */
+    .pg-label { position: absolute; height: 28px; box-sizing: border-box; padding: 0 12px; background: var(--net-input-bg); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; font: 13px/26px system-ui, sans-serif; text-align: center; cursor: pointer; }
+    .pg-row { position: absolute; }
+    /* Settings rows */
+    .pg-setting { position: absolute; height: 34px; box-sizing: border-box; padding: 0 10px; background: rgba(8,20,40,0.6); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; font: 13px/32px system-ui, sans-serif; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .pg-setting input { flex: 0 0 45%; min-width: 200px; padding: 6px 8px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; text-align: right; }
+    .pg-setting input::placeholder { color: #6d8db1; }
+  </style>
+  <div id="pregame-overlay" class="pregame-overlay hidden">
+    <div class="pg-inner" id="pregame-inner"></div>
+  </div>
+  <!-- HTML HUD scoreboard overlay (only visible during gameplay) -->
+  <div id="hud-scoreboard" class="hud-scoreboard hidden"></div>
+  <!-- Networking overlays UI -->
+  <style>
+    /* Theme */
+    :root {
+      --net-bg: rgba(10, 22, 46, 0.92);
+      --net-overlay-tint: rgba(8, 16, 32, 0.6);
+      --net-border: #214d7a;
+      --net-glow: rgba(79, 181, 255, 0.35);
+      --net-accent: #9fd1ff;
+      --net-text: #e8f2ff;
+      --net-muted: #9bb3cd;
+      --net-input-bg: #0f223f;
+      --net-input-border: #2b4e76;
+      --net-btn-bg: #133055;
+      --net-btn-border: #2b5b8e;
+      --net-btn-hover: #1a3b66;
+      --net-chat-self: #62e0a1;
+      --net-chat-note: #8fb0d1;
+    }
+
+    /* Shared styles */
+    .net-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--net-overlay-tint); z-index: 1000; font-family: system-ui, sans-serif; color: var(--net-text); }
+    .net-overlay.hidden { display: none !important; }
+    .net-panel { position: relative; background: var(--net-bg); border: 1px solid var(--net-border); box-shadow: 0 0 0 1px var(--net-border), 0 8px 30px var(--net-glow), inset 0 0 40px rgba(0,0,0,0.35); width: min(860px, 92vw); max-height: 90vh; padding: 16px; overflow: auto; border-radius: 10px; }
+    .net-panel h2 { margin: 0 0 8px 0; font-size: 18px; letter-spacing: 0.5px; color: var(--net-accent); }
+    .net-status { margin: 4px 0 12px 0; font-size: 13px; color: var(--net-muted); white-space: pre-line; }
+    .net-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .net-controls input { padding: 8px 10px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; }
+    .net-controls input::placeholder { color: #6d8db1; }
+    .net-controls button { padding: 8px 12px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; cursor: pointer; transition: background 120ms ease; }
+    .net-controls button:hover { background: var(--net-btn-hover); }
+    .net-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+    #player-list { border: 1px solid var(--net-input-border); padding: 8px; min-height: 160px; background: rgba(8,20,40,0.6); margin: 0; list-style: none; border-radius: 6px; }
+    #player-list li { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    #player-list li:last-child { border-bottom: none; }
+    #player-list .player-list-empty { color: var(--net-muted); font-style: italic; }
+    .chat-message { margin: 2px 0; }
+    .chat-message.notification-message { color: var(--net-chat-note); font-style: italic; }
+    .chat-message.self-message { color: var(--net-chat-self); }
+    .net-close { position: absolute; right: 16px; top: 16px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  </style>
+  <!-- Connect overlay -->
+  <div id="networking-connect-overlay" class="net-overlay hidden">
+    <div id="networking-connect-panel" class="net-panel">
+      <button id="networking-close-connect-btn" class="net-close">Close</button>
+      <h2>Networking</h2>
+      <div class="net-status"><span id="network-status-connect">Idle</span></div>
+      <div class="net-controls">
+        <input id="nickname" type="text" placeholder="Nickname" />
+        <input id="room-name" type="text" placeholder="Room Name or Code" />
+        <button id="host-room-btn">Host Room</button>
+        <button id="join-room-btn">Join Room</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat/Lobby overlay -->
+  <style>
+    /* Right-docked chat panel: lives directly next to canvas */
+    /* App shell: canvas and chat side-by-side */
+    #app-shell { position: fixed; inset: 0; display: flex; flex-direction: row; align-items: center; }
+    /* Game area flexes to fill remaining width beside chat */
+    #game-slot { position: relative; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-width: 0; }
+    #myCanvas { display: block; max-width: 100%; max-height: 100%; }
+    /* Right-side chat panel docks inside app shell (not overlay) */
+    #networking-chat-panel {
+      position: relative;
+      /* Let CSS compute available height next to the canvas */
+      height: -webkit-fill-available; /* Safari/Chrome */
+      height: -moz-available;        /* Firefox */
+      z-index: 1;
+      padding: 0 12px; /* no vertical padding so outer height matches canvas exactly */
+      display: flex;
+      flex-direction: column;
+      width: var(--chat-width, 0px);
+      min-width: 0;
+      overflow: hidden;
+      transition: width 160ms ease;
+      box-sizing: border-box;
+      max-height: none;
+      min-height: 0;
+      border-left: 1px solid var(--net-border);
+      height: webkit-fill-available; /* Safari */
+    }
+    #networking-chat-panel.hidden { display: none; }
+    #networking-chat-panel.chat-open { --chat-width: min(34vw, 420px); }
+    /* Drag handle at left edge */
+    #chat-resize-handle { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
+    #chat-resize-handle::after { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.08); }
+    /* Chat content fills remaining height; allow children to shrink for scrolling */
+    #networking-chat-panel #chat { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: hidden; }
+    /* Reuse theme for chat internals */
+    #chat-messages { padding: 8px; flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; background: rgba(8,20,40,0.6); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; word-break: break-word; overflow-wrap: anywhere; }
+    #chat-input { display: flex; gap: 8px; margin-top: 8px; height: 41.6px; flex-shrink: 0; min-width: 0; overflow: hidden; }
+    #chat-message-input { flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; }
+    #chat-send-btn { flex: 0 0 auto; padding: 8px 12px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; cursor: pointer; transition: background 120ms ease; }
+    #chat-send-btn:hover { background: var(--net-btn-hover); }
+  </style>
+  
+
+  <!-- Network stats overlay (gear button toggles this) -->
+  <div id="net-stats-overlay" class="net-overlay hidden">
+    <div class="net-panel">
+      <button class="net-close" onclick="this.closest('.net-overlay').classList.add('hidden')">Close</button>
+      <h2>Network Stats</h2>
+      <div class="net-status"><span id="network-status">Idle</span></div>
+    </div>
+  </div>
+  <!-- Hidden sprite assets referencing resources/ (provide your actual files) -->
+  <img id="tank" alt="tank" style="display:none" src="res/tanks/tank1.png" />
+  <img id="pills" alt="trippy" style="display:none" src="res/powerups/pills.png" />
+  <img id="unlimited" alt="unlimited" style="display:none" src="res/powerups/unlimited.png" />
+  <img id="tripleshot" alt="tripleshot" style="display:none" src="res/powerups/tripleshot.png" />
+  <img id="ghost" alt="ghost" style="display:none" src="res/powerups/ghost.png" />
+  <img id="teleport" alt="teleport" style="display:none" src="res/powerups/teleport.png" />
+  <img id="cannonball" alt="cannonball" style="display:none" src="res/powerups/cannonball.png" />
+  <img id="invisible" alt="invisible" style="display:none" src="res/powerups/invisible.png" />
+  <img id="repel" alt="repel" style="display:none" src="res/powerups/repel.png" />
+  <img id="hex" alt="hex" style="display:none" src="res/powerups/hex.png" />
+  <img id="network-icon" alt="network" style="display:none" src="res/ui/network.png" />
+</body>
+</html>
