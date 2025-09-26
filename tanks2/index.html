@@ -9,69 +9,154 @@
     body { background: #fff; }
     /* Let JS control canvas CSS size for aspect-preserving letterboxing */
     #myCanvas { display: block; }
+    /* Stage wraps canvas so overlays can size via CSS */
+    .game-stage { position: relative; display: inline-block; line-height: 0; }
+    .pregame-overlay { position: absolute; inset: 0; z-index: 20; pointer-events: auto; display: flex; align-items: center; justify-content: center; background: rgba(8, 16, 32, 0.58); backdrop-filter: blur(2px); }
+    .pregame-overlay.hidden { display: none; }
+    .pg-inner { width: 100%; height: 100%; padding: 32px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: var(--net-text); pointer-events: auto; overflow: auto; }
     /* Simple HUD scoreboard overlay aligned to canvas top */
     .hud-scoreboard { position: fixed; z-index: 10; left: 0; top: 0; width: 0; height: 0; pointer-events: auto; }
     /* Disable clicks by default, re-enable for specific controls */
     .hud-scoreboard * { pointer-events: none; }
     .hud-scoreboard.hidden { display: none; }
-    .hud-scoreboard .sb-inner { position: relative; width: 100%; height: 100%; box-sizing: border-box; background: rgba(160,160,160,0.92); border: 1px solid #808080; border-radius: 6px; padding: 6px 10px; display: flex; align-items: flex-end; justify-content: space-between; font-family: Verdana, system-ui, sans-serif; }
-    .hud-scoreboard .sb-player { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; color: #111; font-weight: 600; font-size: 18px; }
+    .hud-scoreboard .sb-inner { position: relative; width: 100%; height: 100%; box-sizing: border-box; background: rgba(160,160,160,0.92); border: 1px solid #808080; border-radius: 6px; padding: 6px 72px 6px 10px; display: flex; align-items: stretch; justify-content: flex-start; font-family: Verdana, system-ui, sans-serif; }
+    /* Equal columns that stretch edge-to-edge; leftmost at 0%, rightmost at 100% */
+    .hud-scoreboard .sb-players { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: end; width: 100%; height: 100%; pointer-events: none; column-gap: 0; justify-content: stretch; }
+    .hud-scoreboard .sb-player { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; color: #111; font-weight: 600; font-size: 18px; }
     .hud-scoreboard .sb-row { display: flex; align-items: center; gap: 6px; }
     .hud-scoreboard .sb-tank { width: 18px; height: 18px; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 1px 0 rgba(0,0,0,0.35)); }
     .hud-scoreboard .sb-icon { width: 18px; height: 18px; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 1px 0 rgba(0,0,0,0.5)); transform: translateX(8px); }
-    .hud-scoreboard .sb-network { position: absolute; right: 8px; top: 6px; pointer-events: auto; cursor: pointer; user-select: none; }
+    /* Network button: icon-only, transparent, at far right */
+    .hud-scoreboard .sb-network {
+      position: absolute;
+      right: 6px;
+      top: 6px;
+      pointer-events: auto;
+      cursor: pointer;
+      user-select: none;
+      background: transparent;
+      border: none;
+      padding: 0;
+      line-height: 0; /* tighten button box around icon */
+    }
     .hud-scoreboard .sb-network, .hud-scoreboard .sb-network * { pointer-events: auto; }
     .hud-scoreboard .sb-network img { width: 22px; height: 22px; display: block; }
-    .hud-scoreboard .sb-test { position: absolute; right: 38px; top: 6px; height: 22px; padding: 0 6px; font-size: 12px; border: 1px solid #2b5b8e; background: #133055; color: #e8f2ff; border-radius: 4px; cursor: pointer; }
+    /* Test button: shifted left enough to avoid overlap with network icon */
+    .hud-scoreboard .sb-test {
+      position: absolute;
+      right: 36px; /* icon(22) + gap(14) */
+      top: 6px;
+      height: 22px;
+      padding: 0 6px;
+      font-size: 12px;
+      border: 1px solid #2b5b8e;
+      background: #133055;
+      color: #e8f2ff;
+      border-radius: 4px;
+      cursor: pointer;
+    }
     .hud-scoreboard .sb-test:hover { background: #1a3b66; }
     .hud-scoreboard .sb-test, .hud-scoreboard .sb-test * { pointer-events: auto; }
   </style>
   <!-- PeerJS (global UMD build) -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-  <script type="module" src="bundle.js"></script>
+  <script type="module" src="js/main.js"></script>
 </head>
 <body>
   <div id="app-shell">
     <div id="game-slot">
-      <canvas id="myCanvas" width="1280" height="720"></canvas>
-    </div>
-    <div id="networking-chat-panel" class="net-panel hidden">
-      <div id="chat-resize-handle" aria-hidden="true"></div>
-      <div id="chat">
-        <div id="chat-messages"></div>
-        <div id="chat-input">
-          <input id="chat-message-input" type="text" placeholder="Type a message" />
-          <button id="chat-send-btn">Send</button>
+      <div id="game-stage" class="game-stage">
+        <canvas id="myCanvas" width="1280" height="720"></canvas>
+        <!-- Pregame UI overlay (HTML panels instead of canvas drawing) -->
+        <div id="pregame-overlay" class="pregame-overlay hidden">
+          <div class="pg-inner" id="pregame-inner"></div>
+        </div>
+      </div>
+      <div id="networking-chat-panel" class="net-panel hidden">
+        <div id="chat-resize-handle" aria-hidden="true"></div>
+        <div id="chat">
+          <div id="chat-messages"></div>
+          <div id="chat-input">
+            <input id="chat-message-input" type="text" placeholder="Type a message" />
+            <button id="chat-send-btn">Send</button>
+          </div>
         </div>
       </div>
     </div>
   </div>
-  <!-- Pregame UI overlay (HTML panels instead of canvas drawing) -->
+  <!-- Pregame overlay styles continued: panel look -->
   <style>
-    .pregame-overlay { position: fixed; z-index: 20; left: 0; top: 0; width: 0; height: 0; pointer-events: auto; }
-    .pregame-overlay.hidden { display: none; }
-    .pg-inner { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; transform-origin: 0 0; font-family: system-ui, sans-serif; color: var(--net-text); }
-    /* Panels styled like net-panel */
-    .pg-panel { position: absolute; height: 100%; box-sizing: border-box; background: #000; border: 1px solid var(--net-border); box-shadow: 0 0 0 1px var(--net-border), 0 8px 30px var(--net-glow), inset 0 0 40px rgba(0,0,0,0.35); border-radius: 10px; overflow: hidden; }
-    .pg-panel-inner { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--net-bg); border-radius: 8px; }
-    /* Apply inner insets via padding to mimic borders */
-    .pg-panel-inner[data-inset] { padding: var(--pg-inset-n,0) var(--pg-inset-e,0) var(--pg-inset-s,0) var(--pg-inset-w,0); }
-    /* Buttons styled like net-controls buttons */
-    .pg-btn { position: absolute; height: 28px; box-sizing: border-box; padding: 0 12px; background: var(--net-btn-bg); color: var(--net-text); border: 1px solid var(--net-btn-border); border-radius: 6px; cursor: pointer; font: 13px/26px system-ui, sans-serif; text-align: center; }
-    .pg-btn:hover { background: var(--net-btn-hover); }
-    /* Labels for control mapping look like buttons for consistency */
-    .pg-label { position: absolute; height: 28px; box-sizing: border-box; padding: 0 12px; background: var(--net-input-bg); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; font: 13px/26px system-ui, sans-serif; text-align: center; cursor: pointer; }
-    .pg-row { position: absolute; }
-    /* Settings rows */
-    .pg-setting { position: absolute; height: 34px; box-sizing: border-box; padding: 0 10px; background: rgba(8,20,40,0.6); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; font: 13px/32px system-ui, sans-serif; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .pg-setting input { flex: 0 0 45%; min-width: 200px; padding: 6px 8px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; text-align: right; }
-    .pg-setting input::placeholder { color: #6d8db1; }
+    .pg-main-layout { display: flex; flex-direction: row; gap: 24px; width: 100%; max-width: min(1100px, 94vw); align-items: stretch; }
+    .pg-card { flex: 0 0 auto; background: var(--net-bg); border: 1px solid var(--net-border); box-shadow: 0 0 0 1px var(--net-border), 0 12px 32px rgba(8, 0, 32, 0.45), inset 0 0 40px rgba(0,0,0,0.35); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box; min-height: 0; }
+    .pg-card__title { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.4px; color: var(--net-accent); }
+    .pg-card__description { margin: 0; font-size: 14px; line-height: 1.4; color: var(--net-muted); }
+    .pg-action-list { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
+    .pg-btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 10px 14px; font: 14px/1.2 system-ui, sans-serif; border-radius: 8px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); cursor: pointer; transition: background 140ms ease, transform 140ms ease, border-color 140ms ease; box-sizing: border-box; }
+    .pg-btn:hover { background: var(--net-btn-hover); transform: translateY(-1px); }
+    .pg-btn--primary { background: linear-gradient(180deg, rgba(37, 98, 168, 0.85), rgba(20, 58, 105, 0.95)); border-color: #4e8de0; box-shadow: 0 0 0 1px rgba(78, 141, 224, 0.35); }
+    .pg-btn--primary:hover { background: linear-gradient(180deg, rgba(62, 128, 206, 0.9), rgba(33, 86, 158, 0.95)); }
+    .pg-btn--danger { background: linear-gradient(180deg, rgba(166, 44, 60, 0.9), rgba(102, 26, 36, 0.95)); border-color: #c03a4f; color: #ffe7ec; }
+    .pg-btn--danger:hover { background: linear-gradient(180deg, rgba(186, 64, 80, 0.95), rgba(124, 32, 44, 0.95)); }
+    .pg-card--start { flex: 0 0 260px; max-width: 280px; gap: 20px; }
+    .pg-tank-stack { flex: 1 1 auto; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+    .pg-stack-header { font-size: 18px; font-weight: 600; letter-spacing: 0.4px; color: var(--net-accent); margin: 4px 0 0; }
+    .pg-tank-grid { flex: 1 1 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; padding-right: 4px; overflow-y: auto; align-content: start; }
+    .pg-empty-state { margin: 0 auto; font-size: 14px; color: var(--net-muted); padding: 12px 0; text-align: center; }
+    .pg-card.pg-tank { position: relative; padding: 16px; gap: 12px; border: 2px solid var(--tank-border, rgba(75, 125, 182, 0.9)); background: linear-gradient(180deg, rgba(13, 28, 52, 0.88), rgba(9, 20, 40, 0.94)); overflow: hidden; }
+    .pg-card.pg-tank::before { content: ''; position: absolute; inset: -40% -40% auto; height: 70%; background: radial-gradient(circle at top, var(--tank-glow, rgba(159, 209, 255, 0.2)) 0%, transparent 70%); opacity: 0.85; pointer-events: none; }
+    .pg-card.pg-tank > * { position: relative; z-index: 1; }
+    .pg-tank__title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; display: flex; align-items: center; gap: 10px; }
+    .pg-tank__swatch { width: 16px; height: 16px; border-radius: 999px; background: var(--tank-border, #4e8de0); border: 2px solid rgba(255,255,255,0.35); box-shadow: 0 0 0 1px rgba(0,0,0,0.25); flex: 0 0 auto; }
+    .pg-control-list { display: flex; flex-direction: column; gap: 8px; }
+    .pg-control { display: flex; align-items: center; justify-content: center; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--net-input-border); background: rgba(16, 33, 60, 0.85); color: var(--net-text); font: 13px/1.2 system-ui, sans-serif; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
+    .pg-control:hover { border-color: var(--net-btn-border); background: rgba(28, 56, 92, 0.9); transform: translateY(-1px); }
+    .pg-control--active { border-color: var(--net-accent); box-shadow: 0 0 0 1px rgba(159, 209, 255, 0.45), 0 0 12px rgba(159, 209, 255, 0.3); background: rgba(30, 70, 120, 0.85); }
+    .pg-tank__footer { display: flex; justify-content: flex-end; margin-top: auto; }
+    .pg-settings-layout { display: flex; width: 100%; justify-content: center; }
+    .pg-card--settings { width: min(640px, 90%); gap: 20px; }
+    .pg-setting-list { display: flex; flex-direction: column; gap: 12px; }
+    .pg-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--net-input-border); background: rgba(12, 28, 52, 0.72); font: 14px/1.3 system-ui, sans-serif; color: var(--net-text); }
+    .pg-setting__label { flex: 1 1 auto; margin-right: 12px; }
+    .pg-setting input[type="text"] { flex: 0 1 180px; min-width: 140px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--net-input-border); background: var(--net-input-bg); color: var(--net-text); font: 14px/1.2 system-ui; outline: none; text-align: right; transition: border-color 120ms ease, background 120ms ease; }
+    .pg-setting input[type="text"]:focus { border-color: var(--net-accent); background: rgba(28, 56, 92, 0.9); }
+    .pg-setting--toggle { cursor: pointer; }
+    .pg-setting--toggle input { width: 20px; height: 20px; accent-color: var(--net-accent); cursor: pointer; }
+    .pg-setting--toggle input:focus-visible { outline: 2px solid var(--net-accent); outline-offset: 2px; }
+    .pg-settings__footer { display: flex; justify-content: flex-end; margin-top: auto; }
+    .pg-inner::-webkit-scrollbar { width: 10px; }
+    .pg-inner::-webkit-scrollbar-thumb { background: rgba(112, 135, 168, 0.4); border-radius: 6px; }
+    .pg-inner::-webkit-scrollbar-track { background: rgba(10, 22, 46, 0.35); }
+    .pg-card.pg-tank[data-palette="0"] { --tank-border: #63C132; --tank-glow: rgba(99, 193, 50, 0.28); }
+    .pg-card.pg-tank[data-palette="1"] { --tank-border: #FFAD69; --tank-glow: rgba(255, 173, 105, 0.32); }
+    .pg-card.pg-tank[data-palette="2"] { --tank-border: #54F2F2; --tank-glow: rgba(84, 242, 242, 0.32); }
+    .pg-card.pg-tank[data-palette="3"] { --tank-border: #D90429; --tank-glow: rgba(217, 4, 41, 0.42); }
+    .pg-card.pg-tank[data-palette="4"] { --tank-border: #04A777; --tank-glow: rgba(4, 167, 119, 0.32); }
+    .pg-card.pg-tank[data-palette="5"] { --tank-border: #042A2B; --tank-glow: rgba(4, 42, 43, 0.45); }
+    .pg-card.pg-tank[data-palette="6"] { --tank-border: #6D98BA; --tank-glow: rgba(109, 152, 186, 0.3); }
+    .pg-card.pg-tank[data-palette="7"] { --tank-border: #D3B99F; --tank-glow: rgba(211, 185, 159, 0.35); }
+    .pg-card.pg-tank[data-palette="8"] { --tank-border: #1E3888; --tank-glow: rgba(30, 56, 136, 0.38); }
+    .pg-card.pg-tank[data-palette="9"] { --tank-border: #1282A2; --tank-glow: rgba(18, 130, 162, 0.34); }
+    .pg-card.pg-tank[data-palette="10"] { --tank-border: #D90368; --tank-glow: rgba(217, 3, 104, 0.38); }
+    .pg-card.pg-tank[data-palette="default"] { --tank-border: #4e8de0; --tank-glow: rgba(78, 141, 224, 0.32); }
+    @media (max-width: 960px) {
+      .pg-main-layout { flex-direction: column; }
+      .pg-card--start { width: 100%; max-width: none; }
+    }
+    @media (max-width: 720px) {
+      .pg-tank-grid { grid-template-columns: minmax(220px, 1fr); }
+    }
   </style>
-  <div id="pregame-overlay" class="pregame-overlay hidden">
-    <div class="pg-inner" id="pregame-inner"></div>
-  </div>
+  
   <!-- HTML HUD scoreboard overlay (only visible during gameplay) -->
-  <div id="hud-scoreboard" class="hud-scoreboard hidden"></div>
+  <div id="hud-scoreboard" class="hud-scoreboard hidden">
+    <div class="sb-inner">
+      <div class="sb-players"></div>
+      <button class="sb-test" type="button" title="Flatten walls + regen powerups">Test</button>
+      <button class="sb-network" type="button" title="Network Stats">
+        <img src="res/ui/network.png" alt="network" />
+      </button>
+    </div>
+  </div>
   <!-- Networking overlays UI -->
   <style>
     /* Theme */
