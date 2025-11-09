@@ -321,10 +321,14 @@
 
                     <!-- Collapse Threshold Input -->
                     <div class="mb-4">
-                        <label for="collapseThresholdInput" class="block text-sm font-medium text-gray-700 mb-1">Collapse Threshold</label>
+                        <label for="collapseThresholdInput" class="block text-sm font-medium text-gray-700 mb-1">Collapse Threshold (Delta E)</label>
                         <input type="number" id="collapseThresholdInput" name="collapseThresholdInput"
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               placeholder="Threshold (0.0 - 1.0)" min="0" max="1" step="0.01">
+                               placeholder="e.g., 2.5" step="0.1" value="2.5"
+                               title="Sets the perceptual color difference (CIELAB Delta E).
+1.0 = Barely perceptible difference
+2.5 = Noticeable difference
+10.0+ = Very different colors">
                         <p id="collapseThresholdError" class="text-sm text-red-600 mt-1 h-5"></p> <!-- h-5 to prevent layout shift -->
                     </div>
 
@@ -511,10 +515,10 @@
         // Collapse feature listener
         collapseThresholdInput.addEventListener('input', () => {
             const val = parseFloat(collapseThresholdInput.value);
-            if (collapseThresholdInput.value === '' || (!isNaN(val) && val >= 0 && val <= 1)) {
+            if (collapseThresholdInput.value === '' || (!isNaN(val) && val >= 0)) {
                 collapseThresholdError.textContent = '';
             } else {
-                collapseThresholdError.textContent = 'Invalid input. Must be 0.0-1.0';
+                collapseThresholdError.textContent = 'Invalid input. Must be a positive number.';
             }
         });
 
@@ -1037,9 +1041,9 @@
             const threshold = parseFloat(thresholdVal);
 
             // Validate input
-            if (thresholdVal === '' || isNaN(threshold) || threshold < 0 || threshold > 1) {
-                collapseThresholdError.textContent = 'Invalid input. Must be 0.0-1.0';
-                collapseThresholdInput.value = '';
+            if (thresholdVal === '' || isNaN(threshold) || threshold < 0) {
+                collapseThresholdError.textContent = 'Invalid input. Must be a positive number.';
+                collapseThresholdInput.value = '2.5'; // Reset to default
                 return;
             }
             collapseThresholdError.textContent = ''; // Clear error if valid
@@ -1062,10 +1066,6 @@
                 const newPalette = [];
                 const removedColorsSet = new Set(); // Use a Set for fast O(1) lookups
                 
-                // Max theoretical Lab distance. L: 0-100, a/b: approx -128 to 127
-                // Max dist is sqrt(100^2 + 255^2 + 255^2) approx 364.6
-                // We'll normalize by this to get a 0-1 range.
-                const MAX_LAB_DIST = 364.6;
                 const targetColorStr = JSON.stringify(targetColor);
 
                 // Pass 1: Determine new palette and colors to remove
@@ -1082,9 +1082,8 @@
                         Math.pow(targetLab[2] - currentLab[2], 2)
                     );
                     
-                    const normalizedDist = labDist / MAX_LAB_DIST;
-
-                    if (normalizedDist >= threshold) {
+                    // Compare labDist (Delta E) directly to the threshold
+                    if (labDist >= threshold) {
                         // This color is *different enough*, so we keep it
                         newPalette.push(color);
                     } else {
