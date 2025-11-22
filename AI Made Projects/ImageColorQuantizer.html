@@ -86,7 +86,7 @@
             opacity: 1;
             /* Show on hover */
         }
-        
+
         /* --- Styles for Delete Button --- */
         .delete-color-btn {
             position: absolute;
@@ -94,38 +94,45 @@
             right: -5px;
             width: 20px;
             height: 20px;
-            background-color: #ef4444; /* red-500 */
+            background-color: #ef4444;
+            /* red-500 */
             color: white;
             border-radius: 50%;
             border: 1px solid white;
             font-size: 14px;
-            line-height: 18px; /* Adjust for vertical centering */
+            line-height: 18px;
+            /* Adjust for vertical centering */
             text-align: center;
             font-weight: bold;
             cursor: pointer;
             opacity: 0;
             transform: scale(0.5);
             transition: all 0.2s ease;
-            z-index: 20; /* Make sure it's above other elements */
+            z-index: 20;
+            /* Make sure it's above other elements */
         }
 
         .delete-color-btn:hover {
-            background-color: #dc2626; /* red-600 */
+            background-color: #dc2626;
+            /* red-600 */
         }
-        
+
         /* --- Styles for Collapse Button --- */
         .collapse-color-btn {
             position: absolute;
             top: -5px;
-            left: -5px; /* Positioned top-left */
+            left: -5px;
+            /* Positioned top-left */
             width: 20px;
             height: 20px;
-            background-color: #3b82f6; /* blue-500 */
+            background-color: #3b82f6;
+            /* blue-500 */
             color: white;
             border-radius: 50%;
             border: 1px solid white;
             font-size: 14px;
-            line-height: 18px; /* Adjust for vertical centering */
+            line-height: 18px;
+            /* Adjust for vertical centering */
             text-align: center;
             font-weight: bold;
             cursor: pointer;
@@ -136,7 +143,8 @@
         }
 
         .collapse-color-btn:hover {
-            background-color: #2563eb; /* blue-600 */
+            background-color: #2563eb;
+            /* blue-600 */
         }
 
         .palette-swatch:hover .delete-color-btn,
@@ -202,7 +210,8 @@
         }
 
         /* Pixel art rendering for canvases and images */
-        canvas, img {
+        canvas,
+        img {
             image-rendering: optimizeSpeed;
             image-rendering: -moz-crisp-edges;
             image-rendering: -webkit-optimize-contrast;
@@ -284,8 +293,10 @@
                 <h2 class="text-xl font-semibold text-center mb-4">Quantized Image <span id="quantizedImageSize"
                         class="text-base text-gray-500 font-normal"></span></h2>
                 <div class="relative">
-                    <canvas id="quantizedCanvas" class="w-full h-auto rounded-lg shadow-md border border-gray-200 hidden"></canvas>
-                    <img id="quantizedImage" class="w-full h-auto rounded-lg shadow-md border border-gray-200" alt="Quantized Image Output">
+                    <canvas id="quantizedCanvas"
+                        class="w-full h-auto rounded-lg shadow-md border border-gray-200 hidden"></canvas>
+                    <img id="quantizedImage" class="w-full h-auto rounded-lg shadow-md border border-gray-200"
+                        alt="Quantized Image Output">
                 </div>
                 <!-- PSNR (Quality) widget moved here -->
                 <div class="mt-4 bg-gray-50 p-4 rounded-lg shadow-sm">
@@ -314,22 +325,30 @@
                 <div>
                     <div class="flex justify-between items-center mb-2">
                         <h4 class="font-semibold text-gray-800">Current Palette</h4>
-                        <button id="exportPaletteBtn"
-                            class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                            disabled>Export Palette</button>
+                        <div class="flex gap-2">
+                            <button id="collapseAllBtn"
+                                class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                disabled>Collapse All
+                            </button>
+                            <button id="exportPaletteBtn"
+                                class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                disabled>Export Palette
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Collapse Threshold Input -->
                     <div class="mb-4">
-                        <label for="collapseThresholdInput" class="block text-sm font-medium text-gray-700 mb-1">Collapse Threshold (Delta E)</label>
+                        <label for="collapseThresholdInput"
+                            class="block text-sm font-medium text-gray-700 mb-1">Collapse Threshold (Delta E)</label>
                         <input type="number" id="collapseThresholdInput" name="collapseThresholdInput"
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               placeholder="e.g., 2.5" step="0.1" value="2.5"
-                               title="Sets the perceptual color difference (CIELAB Delta E).
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="e.g., 2.5" step="0.1" value="2.5" title="Sets the perceptual color difference (CIELAB Delta E).
 1.0 = Barely perceptible difference
 2.5 = Noticeable difference
 10.0+ = Very different colors">
-                        <p id="collapseThresholdError" class="text-sm text-red-600 mt-1 h-5"></p> <!-- h-5 to prevent layout shift -->
+                        <p id="collapseThresholdError" class="text-sm text-red-600 mt-1 h-5"></p>
+                        <!-- h-5 to prevent layout shift -->
                     </div>
 
                     <div id="paletteContainer"
@@ -426,7 +445,7 @@
                 class="flex-1 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-transform transform hover:scale-105">Cancel</button>
         </div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
     <script>
@@ -444,6 +463,7 @@
         const psnrValueEl = document.getElementById('psnrValue');
         const paletteContainer = document.getElementById('paletteContainer');
         const exportPaletteBtn = document.getElementById('exportPaletteBtn');
+        const collapseAllBtn = document.getElementById('collapseAllBtn');
         const runFullAnalysisBtn = document.getElementById('runFullAnalysisBtn');
         const fullAnalysisResults = document.getElementById('fullAnalysisResults');
         const analysisTableBody = document.getElementById('analysisTableBody');
@@ -499,6 +519,7 @@
         imageUpload.addEventListener('change', (e) => handleImageFile(e.target.files[0]));
         colorSlider.addEventListener('input', handleSliderChange);
         exportPaletteBtn.addEventListener('click', handleExportPalette);
+        collapseAllBtn.addEventListener('click', collapseAllColors);
         runFullAnalysisBtn.addEventListener('click', runFullAnalysis);
         rgbTabBtn.addEventListener('click', () => switchColorPickerTab('rgb'));
         hslTabBtn.addEventListener('click', () => switchColorPickerTab('hsl'));
@@ -511,7 +532,7 @@
         algorithmSelect.addEventListener('change', startQuantization);
         ditheringCheckbox.addEventListener('change', startQuantization);
         paletteUpload.addEventListener('change', (e) => handlePaletteUpload(e.target.files[0]));
-        
+
         // Collapse feature listener
         collapseThresholdInput.addEventListener('input', () => {
             const val = parseFloat(collapseThresholdInput.value);
@@ -565,7 +586,7 @@
                     fullAnalysisResults.classList.add('hidden');
 
                     setControlsEnabled(true);
-                    isCustomPaletteActive = false; 
+                    isCustomPaletteActive = false;
                     paletteFileNameEl.textContent = 'Upload Palette (TXT)...';
                     updateStatus('Image loaded. Ready to quantize.');
                     startQuantization();
@@ -624,6 +645,7 @@
             algorithmSelect.disabled = !enabled;
             runFullAnalysisBtn.disabled = !enabled;
             exportPaletteBtn.disabled = !enabled;
+            collapseAllBtn.disabled = !enabled;
             ditheringCheckbox.disabled = !enabled;
             paletteUpload.disabled = !enabled;
             collapseThresholdInput.disabled = !enabled;
@@ -682,13 +704,13 @@
                 }
             }, 10);
         }
-        
+
         function updateQuantizedImageDetails(quantizedImageData) {
             currentQuantizedImageData = quantizedImageData;
 
             const psnr = calculatePSNR(originalImageData, currentQuantizedImageData);
             psnrValueEl.innerHTML = isFinite(psnr) ? `${psnr.toFixed(2)} dB` : `&infin;`;
-            
+
             let indexedPngBuffer;
             try {
                 // Use the palette length before it might be modified by unique filter if UPNG needs it
@@ -700,13 +722,13 @@
                     // Fallback to 256 colors if palette size was the issue
                     indexedPngBuffer = UPNG.encode([quantizedImageData.data.buffer], quantizedImageData.width, quantizedImageData.height, 256);
                 } catch (e2) {
-                     console.error("Final PNG Encoding Error:", e2);
+                    console.error("Final PNG Encoding Error:", e2);
                     updateStatus("Error creating indexed PNG.", true);
                     quantizedImageSizeEl.textContent = `(Error)`;
                     return;
                 }
             }
-            
+
             if (currentObjectUrl) {
                 URL.revokeObjectURL(currentObjectUrl);
             }
@@ -1002,7 +1024,7 @@
             }
 
             updateStatus(`Removing color ${rgbToHex(...colorToRemove)}...`);
-            
+
             setTimeout(() => {
                 const colorToRemoveStr = JSON.stringify(colorToRemove);
                 const colorIndex = currentPalette.findIndex(p => JSON.stringify(p) === colorToRemoveStr);
@@ -1018,14 +1040,14 @@
                     } else {
                         remappedImageData = mapPixelsToPaletteKMeans(originalImageData, currentPalette);
                     }
-                    
+
                     updateQuantizedImageDetails(remappedImageData);
                     displayPalette(currentPalette);
 
                     const newColorCount = currentPalette.length;
                     sliderValueEl.textContent = newColorCount;
                     if (!isCustomPaletteActive) {
-                       colorSlider.value = newColorCount;
+                        colorSlider.value = newColorCount;
                     }
 
                     updateStatus(`Color removed. New palette has ${currentPalette.length} colors.`);
@@ -1065,7 +1087,7 @@
                 const targetLab = rgbToLab(targetColor);
                 const newPalette = [];
                 const removedColorsSet = new Set(); // Use a Set for fast O(1) lookups
-                
+
                 const targetColorStr = JSON.stringify(targetColor);
 
                 // Pass 1: Determine new palette and colors to remove
@@ -1081,7 +1103,7 @@
                         Math.pow(targetLab[1] - currentLab[1], 2) +
                         Math.pow(targetLab[2] - currentLab[2], 2)
                     );
-                    
+
                     // Compare labDist (Delta E) directly to the threshold
                     if (labDist >= threshold) {
                         // This color is *different enough*, so we keep it
@@ -1096,12 +1118,12 @@
                     updateStatus('No colors found within that threshold to collapse.', false);
                     return;
                 }
-                
+
                 if (newPalette.length < 2) {
                     updateStatus('Collapse would result in fewer than 2 colors. Aborting.', true);
                     return;
                 }
-                
+
                 // Update the palette
                 currentPalette = newPalette;
 
@@ -1111,14 +1133,14 @@
                 const [tr, tg, tb] = targetColor;
 
                 for (let i = 0; i < data.length; i += 4) {
-                    const key = `${data[i]},${data[i+1]},${data[i+2]}`;
+                    const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
                     if (removedColorsSet.has(key)) {
                         data[i] = tr;
-                        data[i+1] = tg;
-                        data[i+2] = tb;
+                        data[i + 1] = tg;
+                        data[i + 2] = tb;
                     }
                 }
-                
+
                 // Update UI with the modified image data and new palette
                 updateQuantizedImageDetails(newImageData);
                 displayPalette(currentPalette);
@@ -1130,6 +1152,128 @@
                 }
 
                 updateStatus(`Colors collapsed. New palette has ${currentPalette.length} colors.`);
+            }, 10);
+        }
+
+        function collapseAllColors() {
+            if (currentPalette.length <= 2) {
+                updateStatus('Cannot collapse further minimum of 2 colors required.', true);
+                return;
+            }
+
+            if (!originalImageData || !currentQuantizedImageData) {
+                updateStatus('Cannot collapse colors without a loaded image.', true);
+                return;
+            }
+
+            const threshold = parseFloat(collapseThresholdInput.value);
+            if (isNaN(threshold) || threshold < 0) {
+                collapseThresholdError.textContent = 'Invalid threshold. Using default 2.5';
+                collapseThresholdInput.value = '2.5';
+                return;
+            }
+
+            updateStatus('Attempting to collapse all colors...');
+
+            setTimeout(() => {
+                let changed = false;
+                let iterations = 0;
+                const maxIterations = 100; // Safety limit
+
+                while (iterations < maxIterations && currentPalette.length > 2) {
+                    const initialLength = currentPalette.length;
+
+                    // Try to collapse each color in the palette
+                    for (let i = 0; i < currentPalette.length && currentPalette.length > 2; i++) {
+                        const targetColor = currentPalette[i];
+                        const targetLab = rgbToLab(targetColor);
+                        const targetColorStr = JSON.stringify(targetColor);
+
+                        let foundSimilar = false;
+
+                        // Check if any other color is similar to this one
+                        for (let j = 0; j < currentPalette.length; j++) {
+                            if (i === j) continue;
+
+                            const otherColor = currentPalette[j];
+                            const otherLab = rgbToLab(otherColor);
+                            const labDist = Math.sqrt(
+                                Math.pow(targetLab[0] - otherLab[0], 2) +
+                                Math.pow(targetLab[1] - otherLab[1], 2) +
+                                Math.pow(targetLab[2] - otherLab[2], 2)
+                            );
+
+                            if (labDist < threshold) {
+                                foundSimilar = true;
+                                break;
+                            }
+                        }
+
+                        // If this color has similar colors, collapse them
+                        if (foundSimilar) {
+                            const newPalette = [];
+                            const removedColorsSet = new Set();
+
+                            for (const color of currentPalette) {
+                                if (JSON.stringify(color) === targetColorStr) {
+                                    newPalette.push(color);
+                                    continue;
+                                }
+
+                                const currentLab = rgbToLab(color);
+                                const labDist = Math.sqrt(
+                                    Math.pow(targetLab[0] - currentLab[0], 2) +
+                                    Math.pow(targetLab[1] - currentLab[1], 2) +
+                                    Math.pow(targetLab[2] - currentLab[2], 2)
+                                );
+
+                                if (labDist >= threshold) {
+                                    newPalette.push(color);
+                                } else {
+                                    removedColorsSet.add(color.join(','));
+                                }
+                            }
+
+                            if (newPalette.length >= 2) {
+                                currentPalette = newPalette;
+                                const data = currentQuantizedImageData.data;
+                                const [tr, tg, tb] = targetColor;
+
+                                for (let i = 0; i < data.length; i += 4) {
+                                    const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
+                                    if (removedColorsSet.has(key)) {
+                                        data[i] = tr;
+                                        data[i + 1] = tg;
+                                        data[i + 2] = tb;
+                                    }
+                                }
+
+                                changed = true;
+                                break; // Start over with the new palette
+                            }
+                        }
+                    }
+
+                    // If we didn't collapse anything this iteration, we're done
+                    if (currentPalette.length === initialLength) {
+                        break;
+                    }
+
+                    iterations++;
+                }
+
+                if (changed) {
+                    updateQuantizedImageDetails(currentQuantizedImageData);
+                    displayPalette(currentPalette);
+                    const newColorCount = currentPalette.length;
+                    sliderValueEl.textContent = newColorCount;
+                    if (!isCustomPaletteActive) {
+                        colorSlider.value = newColorCount;
+                    }
+                    updateStatus(`Collapsed to ${currentPalette.length} colors after ${iterations} iteration(s).`);
+                } else {
+                    updateStatus('No colors found within threshold to collapse.', false);
+                }
             }, 10);
         }
 
@@ -1181,11 +1325,11 @@
         function finalizeColorChange() {
             if (!originalColorForEditing || !latestPreviewColor) return;
             replaceColorInImageData(preEditImageData, originalColorForEditing, latestPreviewColor);
-            
+
             const oldColorStr = JSON.stringify(originalColorForEditing);
             const indexToUpdate = currentPalette.findIndex(p => JSON.stringify(p) === oldColorStr);
             if (indexToUpdate > -1) currentPalette[indexToUpdate] = latestPreviewColor;
-            
+
             updateQuantizedImageDetails(preEditImageData);
             displayPalette(currentPalette);
 
@@ -1199,7 +1343,7 @@
 
         function cancelColorChange() {
             if (!preEditImageData) return;
-            
+
             quantizedCanvas.classList.add('hidden');
             quantizedImage.classList.remove('hidden');
 
