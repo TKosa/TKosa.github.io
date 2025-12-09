@@ -1,0 +1,200 @@
+.pause-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 300;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.pause-menu {
+    width: fit-content;
+    min-width: 320px;
+    max-width: 95vw;
+    padding: 24px;
+    border-radius: 16px;
+    background: rgba(10, 18, 30, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    color: #f5f5f5;
+    text-align: center;
+}
+
+/* ... existing styles ... */
+
+.crafting-row.inventory {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 12px;
+    overflow-x: auto;
+    /* Safety scroll if screen is too small */
+}
+
+.crafting-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    justify-content: center;
+}
+
+.pause-menu-header h2 {
+    margin: 0 0 4px;
+    font-size: 1.8rem;
+    letter-spacing: 1px;
+}
+
+.pause-menu-header p {
+    margin: 0 0 16px;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.pause-menu-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pause-btn {
+    padding: 12px 16px;
+    font-size: 1rem;
+    border-radius: 10px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: #f5f5f5;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.pause-btn:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+.pause-btn.primary {
+    background: linear-gradient(120deg, #38bdf8, #3b82f6);
+    border-color: rgba(255, 255, 255, 0.45);
+    color: #041427;
+    font-weight: bold;
+}
+
+.pause-btn.primary:hover {
+    background: linear-gradient(120deg, #7dd3fc, #60a5fa);
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.recipes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.recipe-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.recipe-inputs,
+.recipe-output {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.recipe-inputs {
+    flex: 1;
+    justify-content: flex-start;
+    flex-direction: row;
+    flex-wrap: nowrap;
+}
+
+.recipe-output {
+    justify-content: flex-end;
+}
+
+.crafting-view {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    margin-bottom: 20px;
+}
+
+.crafting-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.crafting-row.top {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+
+
+.crafting-arrow {
+    font-size: 1.8rem;
+    color: #facc15;
+    margin: 0 8px;
+}
+
+.active-output {
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.active-output:active {
+    transform: scale(0.95);
+}
+
+.disabled-output {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+.recipe-item-box {
+    flex-shrink: 0;
+}
+
+.recipe-operator {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 1.4rem;
+    user-select: none;
+}
+
+.recipe-plus {
+    font-size: 1.1rem;
+    opacity: 0.8;
+}
+
+.recipe-arrow {
+    font-size: 1.6rem;
+    color: #facc15;
+    margin: 0 4px;
+}
+
+.output-item-box {
+    border-color: #4ade80;
+    box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.45), 0 0 8px rgba(74, 222, 128, 0.65);
+}
