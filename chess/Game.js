@@ -12,6 +12,7 @@ export class Game {
     this.boardElement = document.getElementById("chessboard");
     this.statusElement = document.getElementById("status");
     this.selected = null;
+    this.lastMove = null;
     this.promotionPending = false;
     this.pendingPromotion = null;
     this.initializeBoard();
@@ -199,6 +200,7 @@ export class Game {
   // Execute move. Update status. Send move over network if networked game. Update timers.
   makeLocalMove(sRow, sCol, dRow, dCol, newPiece = "") {
     this.chessGame.executeMoveAndUpdateState(sRow, sCol, dRow, dCol, newPiece);
+    this.lastMove = { from: { row: sRow, col: sCol }, to: { row: dRow, col: dCol } };
     eventHub.emit("my-move", { sRow, sCol, dRow, dCol, newPiece });
   }
 
@@ -207,6 +209,7 @@ export class Game {
 		this.updateTimers();
 		this.selected = null;
     this.updateBoard();
+    this.playMovePing();
     this.persistRoomState();
   }
 
@@ -245,6 +248,8 @@ export class Game {
         );
         cell.textContent = this.chessGame.board[row][col];
         cell.classList.remove("selected");
+        cell.classList.remove("last-move-from");
+        cell.classList.remove("last-move-to");
       }
     }
 
@@ -256,6 +261,21 @@ export class Game {
     
 			selectedCell.classList.add("selected");
     }
+
+    if (this.lastMove) {
+      const fromCell = this.boardElement.querySelector(
+        `.cell[data-row="${this.lastMove.from.row}"][data-col="${this.lastMove.from.col}"]`
+      );
+      const toCell = this.boardElement.querySelector(
+        `.cell[data-row="${this.lastMove.to.row}"][data-col="${this.lastMove.to.col}"]`
+      );
+      if (fromCell) {
+        fromCell.classList.add("last-move-from");
+      }
+      if (toCell) {
+        toCell.classList.add("last-move-to");
+      }
+    }
 	}
 	
 
@@ -263,6 +283,7 @@ export class Game {
 		this.chessGame.bringMoveIndexToFront(); // In case player moved back while waiting for move
     const { sRow, sCol, dRow, dCol, newPiece } = move;
     this.chessGame.executeMoveAndUpdateState(sRow, sCol, dRow, dCol, newPiece);
+    this.lastMove = { from: { row: sRow, col: sCol }, to: { row: dRow, col: dCol } };
   }
 
   startGame(isHost) {
@@ -379,6 +400,7 @@ export class Game {
       increment: this.increment,
       startTimeInput: this.startTimeInput.value,
       incrementInput: this.incrementInput.value,
+      lastMove: this.lastMove,
     };
   }
 
@@ -390,6 +412,7 @@ export class Game {
     this.chessGame.history = state.history;
     this.chessGame.moveIndex = state.moveIndex || 0;
     this.chessGame.status = state.status || "Not started";
+    this.lastMove = state.lastMove || null;
     this.whiteTimeMs = state.whiteTimeMs || 0;
     this.blackTimeMs = state.blackTimeMs || 0;
     this.increment = state.increment || 0;
@@ -406,6 +429,32 @@ export class Game {
       return;
     }
     peerManager.saveRoomState(this.getSerializableState());
+  }
+
+  playMovePing() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      return;
+    }
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioCtx();
+    }
+    if (this.audioCtx.state === "suspended") {
+      this.audioCtx.resume();
+    }
+
+    const now = this.audioCtx.currentTime;
+    const osc = this.audioCtx.createOscillator();
+    const gain = this.audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    osc.connect(gain);
+    gain.connect(this.audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
   }
 }
 
