@@ -21,6 +21,9 @@ export class PeerManager {
     this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     this.channel = null;
     this.connected = false;
+    this.lastSeenMessageId = 0;
+    this.seenMessageIds = new Set();
+    this.pollTimer = null;
 
     PeerManager.instance = this;
   }
@@ -38,6 +41,8 @@ export class PeerManager {
 
     const channelName = `room-${roomName}`;
     this.channel = this.supabase.channel(channelName);
+    this.lastSeenMessageId = 0;
+    this.seenMessageIds.clear();
 
     this.channel.on(
       "postgres_changes",
@@ -49,6 +54,11 @@ export class PeerManager {
       },
       (payload) => {
         const row = payload.new || {};
+        if (!row.id || this.seenMessageIds.has(row.id)) {
+          return;
+        }
+        this.seenMessageIds.add(row.id);
+        this.lastSeenMessageId = Math.max(this.lastSeenMessageId, Number(row.id) || 0);
         if (!row.payload || row.sender === this.clientId) {
           return;
         }
@@ -66,7 +76,17 @@ export class PeerManager {
         );
         this.broadcast({ type: "nickname", nickname: this.nickname });
         eventHub.emit("relay-connected", { roomName, nickname: this.nickname });
+        this.syncLastSeenMessageId();
+        this.startMessagePolling();
         this.loadRoomState();
+      } else if (
+        status === "CHANNEL_ERROR" ||
+        status === "TIMED_OUT" ||
+        status === "CLOSED"
+      ) {
+        this.connected = false;
+        eventHub.emit("update-status-display", "Relay connection interrupted. Reconnecting...");
+        this.startMessagePolling();
       }
     });
   }
@@ -74,10 +94,18 @@ export class PeerManager {
   async teardownPeer(reason = "manual") {
     dbg(this.sessionId, "teardownRelay", { reason });
     this.connected = false;
+    this.stopMessagePolling();
     if (this.channel) {
       await this.supabase.removeChannel(this.channel);
       this.channel = null;
     }
+    this.currentRoomName = "";
+  }
+
+  async leaveRoom() {
+    await this.teardownPeer("leave-room");
+    localStorage.removeItem(LAST_ROOM_KEY);
+    localStorage.removeItem(LAST_NICK_KEY);
   }
 
   isConnected() {
@@ -137,6 +165,65 @@ export class PeerManager {
     }
     eventHub.emit("room-state-loaded", data.state);
   }
+
+  async syncLastSeenMessageId() {
+    if (!this.currentRoomName) {
+      return;
+    }
+    const { data } = await this.supabase
+      .from("room_messages")
+      .select("id")
+      .eq("room", this.currentRoomName)
+      .order("id", { ascending: false })
+      .limit(1);
+    if (data && data.length > 0) {
+      this.lastSeenMessageId = Math.max(this.lastSeenMessageId, Number(data[0].id) || 0);
+    }
+  }
+
+  startMessagePolling() {
+    if (this.pollTimer || !this.currentRoomName) {
+      return;
+    }
+    this.pollTimer = setInterval(() => {
+      this.pollMessages();
+    }, 2000);
+  }
+
+  stopMessagePolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  async pollMessages() {
+    if (!this.currentRoomName) {
+      return;
+    }
+    const { data, error } = await this.supabase
+      .from("room_messages")
+      .select("id,sender,payload")
+      .eq("room", this.currentRoomName)
+      .gt("id", this.lastSeenMessageId)
+      .order("id", { ascending: true })
+      .limit(100);
+    if (error || !data) {
+      return;
+    }
+
+    for (const row of data) {
+      if (!row.id || this.seenMessageIds.has(row.id)) {
+        continue;
+      }
+      this.seenMessageIds.add(row.id);
+      this.lastSeenMessageId = Math.max(this.lastSeenMessageId, Number(row.id) || 0);
+      if (row.sender === this.clientId || !row.payload) {
+        continue;
+      }
+      handlePeerMessage(row.payload, { peer: row.sender });
+    }
+  }
 }
 
 export const peerManager = new PeerManager();
@@ -146,6 +233,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const connectBtn = document.getElementById("connect-btn");
   const connectionKeyInput = document.getElementById("connection-key");
   const statusDisplay = document.getElementById("connection-status");
+  const leaveBtn = document.getElementById("leave-btn");
   const messageInput = document.getElementById("message-input");
 
   connectBtn.addEventListener("click", () => {
@@ -177,6 +265,12 @@ document.addEventListener("DOMContentLoaded", () => {
     statusDisplay.textContent = "Reconnecting to room: " + savedRoom;
     peerManager.initializePeer({ roomName: savedRoom, nickname: savedNick || "Guest" });
   }
+
+  leaveBtn.addEventListener("click", async () => {
+    await peerManager.leaveRoom();
+    connectionKeyInput.value = "";
+    statusDisplay.textContent = "Disconnected. Room cleared.";
+  });
 
   function handleSendMessage() {
     const message = messageInput.value.trim();
@@ -235,7 +329,7 @@ function handlePeerMessage(data, conn) {
       peerManager.nicknames[conn.peer] = data.nickname;
       break;
     default:
-      eventHub.emit(data.type, data);
+      eventHub.emit(data.type, { ...data, _senderPeer: conn.peer });
       return;
   }
 }

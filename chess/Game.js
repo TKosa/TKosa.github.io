@@ -1,7 +1,7 @@
 // Everything, including UI, Game Logic, Networking
 // Includes buttons + fields for time control and start/end game 
 
-import { Chess } from "./Chess.js";
+import { Chess } from "./Chess.js?v=20260316e";
 import { peerManager } from './PeerManager.js';
 import { eventHub } from './EventHub.js';
 
@@ -13,6 +13,9 @@ export class Game {
     this.statusElement = document.getElementById("status");
     this.selected = null;
     this.lastMove = null;
+    this.stateVersion = 0;
+    this.playerSlots = { white: null, black: null };
+    this.lastAnnouncedGameStatus = "";
     this.promotionPending = false;
     this.pendingPromotion = null;
     this.initializeBoard();
@@ -51,9 +54,16 @@ export class Game {
       this.startTimeInput.value = data.startTime;
       this.incrementInput.value = data.increment;
       this.initiateTimers(data.startTime, data.increment);
+      this.playerSlots = {
+        white: data.hostId || null,
+        black: peerManager.clientId,
+      };
       this.startGame(false);
     });
     eventHub.on("chess-move", (data) => {
+      if (!this.acceptRemoteMove(data)) {
+        return;
+      }
       this.handleRemoteMove(data.move);
       this.afterMove();
     });
@@ -199,17 +209,29 @@ export class Game {
 
   // Execute move. Update status. Send move over network if networked game. Update timers.
   makeLocalMove(sRow, sCol, dRow, dCol, newPiece = "") {
+    const expectedColor = this.chessGame.getCurrentPlayer();
+    const expectedSender = this.playerSlots[expectedColor];
+    if (expectedSender && expectedSender !== peerManager.clientId) {
+      return;
+    }
+    if (!this.playerSlots[expectedColor]) {
+      this.playerSlots[expectedColor] = peerManager.clientId;
+    }
     this.chessGame.executeMoveAndUpdateState(sRow, sCol, dRow, dCol, newPiece);
     this.lastMove = { from: { row: sRow, col: sCol }, to: { row: dRow, col: dCol } };
     eventHub.emit("my-move", { sRow, sCol, dRow, dCol, newPiece });
   }
 
   afterMove() {
+    this.chessGame.updateGameStatusFromPosition();
     this.updateStatus();
+    this.playGameOverSoundIfNeeded();
+    this.playCheckSoundIfNeeded();
 		this.updateTimers();
 		this.selected = null;
     this.updateBoard();
     this.playMovePing();
+    this.stateVersion += 1;
     this.persistRoomState();
   }
 
@@ -233,6 +255,12 @@ export class Game {
 			this.statusElement.textContent = this.chessGame.status;
 			return;
 		}
+
+    const checkedColor = this.getCheckedColor();
+    if (checkedColor) {
+      this.statusElement.textContent = `The ${checkedColor} king is in check.`;
+      return;
+    }
 		
     const currentPlayer =
       this.chessGame.getCurrentPlayer().charAt(0).toUpperCase() +
@@ -289,6 +317,12 @@ export class Game {
   startGame(isHost) {
 		this.chessGame.reset();
 		this.chessGame.startGame();
+    if (isHost) {
+      this.playerSlots = { white: null, black: null };
+      this.playerSlots.white = peerManager.clientId;
+    } else if (!this.playerSlots) {
+      this.playerSlots = { white: null, black: null };
+    }
     this.renderBoard();
     this.startTimers();
     this.updateStatus(); // Update status after starting the game
@@ -300,6 +334,7 @@ export class Game {
           type: "start-game",
           startTime: this.startTimeInput.value,
           increment: this.incrementInput.value,
+          hostId: peerManager.clientId,
         });
       }
 
@@ -401,6 +436,8 @@ export class Game {
       startTimeInput: this.startTimeInput.value,
       incrementInput: this.incrementInput.value,
       lastMove: this.lastMove,
+      stateVersion: this.stateVersion,
+      playerSlots: this.playerSlots,
     };
   }
 
@@ -408,11 +445,19 @@ export class Game {
     if (!state || !state.board || !state.history) {
       return;
     }
+    if (
+      typeof state.stateVersion === "number" &&
+      state.stateVersion < this.stateVersion
+    ) {
+      return;
+    }
     this.chessGame.board = state.board;
     this.chessGame.history = state.history;
     this.chessGame.moveIndex = state.moveIndex || 0;
     this.chessGame.status = state.status || "Not started";
     this.lastMove = state.lastMove || null;
+    this.stateVersion = state.stateVersion || 0;
+    this.playerSlots = state.playerSlots || { white: null, black: null };
     this.whiteTimeMs = state.whiteTimeMs || 0;
     this.blackTimeMs = state.blackTimeMs || 0;
     this.increment = state.increment || 0;
@@ -422,6 +467,7 @@ export class Game {
     this.blackTimer.textContent = this.formatTime(this.blackTimeMs);
     this.renderBoard();
     this.updateStatus();
+    this.playGameOverSoundIfNeeded();
   }
 
   persistRoomState() {
@@ -429,6 +475,23 @@ export class Game {
       return;
     }
     peerManager.saveRoomState(this.getSerializableState());
+  }
+
+  acceptRemoteMove(data) {
+    if (!data || !data.move) {
+      return false;
+    }
+    const { sRow, sCol, dRow, dCol } = data.move;
+    const expectedColor = this.chessGame.getCurrentPlayer();
+    const sender = data._senderPeer || null;
+    const expectedSender = this.playerSlots[expectedColor];
+    if (expectedSender && sender && expectedSender !== sender) {
+      return false;
+    }
+    if (!expectedSender && sender) {
+      this.playerSlots[expectedColor] = sender;
+    }
+    return this.chessGame.isValidMove(sRow, sCol, dRow, dCol);
   }
 
   playMovePing() {
@@ -455,6 +518,105 @@ export class Game {
     gain.connect(this.audioCtx.destination);
     osc.start(now);
     osc.stop(now + 0.12);
+  }
+
+  playCheckSoundIfNeeded() {
+    if (this.chessGame.status !== "In progress") {
+      return;
+    }
+    const checkedColor = this.getCheckedColor();
+    if (!checkedColor) {
+      return;
+    }
+    const localColor = this.getLocalPlayerColor();
+    if (!localColor || localColor !== checkedColor) {
+      return;
+    }
+    this.playToneSequence([880, 880], 0.1, 0.075);
+  }
+
+  getCheckedColor() {
+    const currentPlayer = this.chessGame.getCurrentPlayer();
+    if (this.chessGame.isKingInCheck(currentPlayer)) {
+      return currentPlayer;
+    }
+    return null;
+  }
+
+  playGameOverSoundIfNeeded() {
+    const status = this.chessGame.status || "";
+    if (!status.startsWith("Game over")) {
+      this.lastAnnouncedGameStatus = "";
+      return;
+    }
+    if (status === this.lastAnnouncedGameStatus) {
+      return;
+    }
+    this.lastAnnouncedGameStatus = status;
+
+    const localColor = this.getLocalPlayerColor();
+    if (status.includes("Stalemate")) {
+      this.playToneSequence([440, 392], 0.12);
+      return;
+    }
+
+    const whiteWon = status.includes("White wins");
+    const blackWon = status.includes("Black wins");
+    const localWon =
+      (whiteWon && localColor === "white") || (blackWon && localColor === "black");
+    const localLost =
+      (whiteWon && localColor === "black") || (blackWon && localColor === "white");
+
+    if (localWon) {
+      this.playToneSequence([523, 659, 784], 0.14);
+      return;
+    }
+    if (localLost) {
+      this.playToneSequence([220, 185, 165], 0.16);
+      return;
+    }
+
+    this.playToneSequence([392, 330], 0.12);
+  }
+
+  getLocalPlayerColor() {
+    if (this.playerSlots.white === peerManager.clientId) {
+      return "white";
+    }
+    if (this.playerSlots.black === peerManager.clientId) {
+      return "black";
+    }
+    return null;
+  }
+
+  playToneSequence(frequencies, stepDuration = 0.12, peakGain = 0.05) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      return;
+    }
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioCtx();
+    }
+    if (this.audioCtx.state === "suspended") {
+      this.audioCtx.resume();
+    }
+
+    const start = this.audioCtx.currentTime;
+    frequencies.forEach((freq, i) => {
+      const t0 = start + i * stepDuration;
+      const t1 = t0 + stepDuration * 0.9;
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(peakGain, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t1);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t1);
+    });
   }
 }
 

@@ -29,6 +29,54 @@ export class Chess {
     this.status = `Game over - ${winner}`;
   }
 
+  // Returns all legal moves for the side to move based on existing validation logic.
+  getLegalMoves() {
+    const legalMoves = [];
+    const currentPlayer = this.getCurrentPlayer();
+
+    for (let sRow = 0; sRow < 8; sRow++) {
+      for (let sCol = 0; sCol < 8; sCol++) {
+        const piece = this.board[sRow][sCol];
+        if (!piece || !this.isPlayerPiece(piece, currentPlayer)) {
+          continue;
+        }
+
+        for (let dRow = 0; dRow < 8; dRow++) {
+          for (let dCol = 0; dCol < 8; dCol++) {
+            if (sRow === dRow && sCol === dCol) {
+              continue;
+            }
+            if (this.isValidMove(sRow, sCol, dRow, dCol)) {
+              legalMoves.push({ sRow, sCol, dRow, dCol });
+            }
+          }
+        }
+      }
+    }
+
+    return legalMoves;
+  }
+
+  updateGameStatusFromPosition() {
+    if (this.status !== "In progress") {
+      return;
+    }
+
+    const currentPlayer = this.getCurrentPlayer();
+    const legalMoves = this.getLegalMoves();
+    if (legalMoves.length > 0) {
+      return;
+    }
+
+    if (this.isKingInCheck(currentPlayer)) {
+      const winner = currentPlayer === "white" ? "Black" : "White";
+      this.status = `Game over - Checkmate. ${winner} wins.`;
+      return;
+    }
+
+    this.status = "Game over - Stalemate.";
+  }
+
   // Getter to infer the current player based on moveIndex
   getCurrentPlayer() {
     return this.moveIndex % 2 === 0 ? "white" : "black";
