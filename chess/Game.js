@@ -52,6 +52,13 @@ export class Game {
       this.initiateTimers(data.startTime, data.increment);
       this.startGame(false);
     });
+    eventHub.on("chess-move", (data) => {
+      this.handleRemoteMove(data.move);
+      this.afterMove();
+    });
+    eventHub.on("room-state-loaded", (state) => {
+      this.applyNetworkState(state);
+    });
 
     this.backButton = document.getElementById("back-button");
     this.forwardButton = document.getElementById("forward-button");
@@ -99,6 +106,7 @@ export class Game {
 		}
 		clearInterval(this.activeTimer);
 		this.activeTimer = null;
+    this.persistRoomState();
   }
 
   onCellClick(row, col) {
@@ -199,6 +207,7 @@ export class Game {
 		this.updateTimers();
 		this.selected = null;
     this.updateBoard();
+    this.persistRoomState();
   }
 
 	// Add increment
@@ -263,29 +272,15 @@ export class Game {
     this.startTimers();
     this.updateStatus(); // Update status after starting the game
     
-    if (peerManager.connections.length > 0) {
+    if (peerManager.isConnected()) {
       this.isNetworkedGame = true;
-      
-      // Add listeners only if they haven't been added before
-      peerManager.connections.forEach((conn) => {
-        if (isHost) {
-          // Send start event to other players
-          conn.send({
-            type: "start-game",
-            startTime: this.startTimeInput.value,
-            increment: this.incrementInput.value,
-          });
-        }
-        if (!this.networkListenersAdded) {
-          // Listen for moves from other players
-          conn.on("data", (data) => {
-            if (data.type === "chess-move") {
-              this.handleRemoteMove(data.move);
-              this.afterMove();
-            }
-          });
-        }
-      });
+      if (isHost) {
+        peerManager.broadcast({
+          type: "start-game",
+          startTime: this.startTimeInput.value,
+          increment: this.incrementInput.value,
+        });
+      }
 
       // If it's the networked game, listen for local event from makeLocalMove and broadcast it over the network
       this.broadcastMove = (move) => {
@@ -300,7 +295,7 @@ export class Game {
 
       this.networkListenersAdded = true; // Mark listeners as added
     }
-    
+    this.persistRoomState();
   }
 
   formatTime(milliseconds) {
@@ -371,6 +366,46 @@ export class Game {
     this.chessGame.goForwardOneMove();
     this.renderBoard();
     this.updateStatus();
+  }
+
+  getSerializableState() {
+    return {
+      board: this.chessGame.board,
+      history: this.chessGame.history,
+      moveIndex: this.chessGame.moveIndex,
+      status: this.chessGame.status,
+      whiteTimeMs: this.whiteTimeMs,
+      blackTimeMs: this.blackTimeMs,
+      increment: this.increment,
+      startTimeInput: this.startTimeInput.value,
+      incrementInput: this.incrementInput.value,
+    };
+  }
+
+  applyNetworkState(state) {
+    if (!state || !state.board || !state.history) {
+      return;
+    }
+    this.chessGame.board = state.board;
+    this.chessGame.history = state.history;
+    this.chessGame.moveIndex = state.moveIndex || 0;
+    this.chessGame.status = state.status || "Not started";
+    this.whiteTimeMs = state.whiteTimeMs || 0;
+    this.blackTimeMs = state.blackTimeMs || 0;
+    this.increment = state.increment || 0;
+    this.startTimeInput.value = state.startTimeInput || "";
+    this.incrementInput.value = state.incrementInput || "";
+    this.whiteTimer.textContent = this.formatTime(this.whiteTimeMs);
+    this.blackTimer.textContent = this.formatTime(this.blackTimeMs);
+    this.renderBoard();
+    this.updateStatus();
+  }
+
+  persistRoomState() {
+    if (!peerManager.isConnected()) {
+      return;
+    }
+    peerManager.saveRoomState(this.getSerializableState());
   }
 }
 

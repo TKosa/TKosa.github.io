@@ -85,6 +85,20 @@
     _hudHandlersBound = true;
   }
 
+  function nowMs() {
+    if (typeof performance !== "undefined" && typeof performance.now === "function") {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
+  function lerpNumber(start, end, alpha) {
+    if (typeof start !== "number" || typeof end !== "number") {
+      return typeof end === "number" ? end : start;
+    }
+    return start + (end - start) * alpha;
+  }
+
   // js/maze/Powerup.js
   function isValidImage(el) {
     return !!(el && el.tagName === "IMG" && el.complete && el.naturalWidth > 0);
@@ -2894,6 +2908,7 @@
       this.remoteBulletLerpDuration = 60;
       this.remoteBulletPredictionWindow = 120;
       this.remoteGlobalBullets = [];
+      this.remoteInterpolation = null;
       this.nextPowerupId = 1;
       this.nextTankId = 1;
       this.tankById = {};
@@ -3504,6 +3519,101 @@
       }
       return list;
     }
+    captureRemoteTankSnapshot() {
+      var snapshot = {};
+      if (!this.remoteTankMap) {
+        return snapshot;
+      }
+      for (var id in this.remoteTankMap) {
+        if (!Object.prototype.hasOwnProperty.call(this.remoteTankMap, id)) {
+          continue;
+        }
+        var tank = this.remoteTankMap[id];
+        if (!tank) {
+          continue;
+        }
+        snapshot[id] = {
+          x: typeof tank.x === "number" ? tank.x : 0,
+          y: typeof tank.y === "number" ? tank.y : 0,
+          rotation: typeof tank.rotation === "number" ? tank.rotation : 0
+        };
+      }
+      return snapshot;
+    }
+    resetRemoteInterpolation() {
+      var snapshot = this.captureRemoteTankSnapshot();
+      var now = nowMs();
+      this.remoteInterpolation = {
+        previous: snapshot,
+        target: snapshot,
+        timestamp: now,
+        duration: 16
+      };
+    }
+    updateRemoteInterpolation(prevSnapshot, nextSnapshot) {
+      if (!nextSnapshot) {
+        nextSnapshot = this.captureRemoteTankSnapshot();
+      }
+      var now = nowMs();
+      var lastTimestamp = this.remoteInterpolation && this.remoteInterpolation.timestamp || null;
+      if (!prevSnapshot || Object.keys(prevSnapshot).length === 0) {
+        prevSnapshot = nextSnapshot;
+      }
+      if (!nextSnapshot) {
+        nextSnapshot = prevSnapshot;
+      }
+      var duration = lastTimestamp ? now - lastTimestamp : 100;
+      if (!duration || duration < 16) {
+        duration = 16;
+      } else if (duration > 250) {
+        duration = 250;
+      }
+      this.remoteInterpolation = {
+        previous: prevSnapshot,
+        target: nextSnapshot,
+        timestamp: now,
+        duration
+      };
+    }
+    getRemoteInterpolationAlpha() {
+      if (!this.remoteInterpolation) {
+        return 1;
+      }
+      var duration = this.remoteInterpolation.duration || 1;
+      var elapsed = nowMs() - this.remoteInterpolation.timestamp;
+      if (!duration || duration <= 0) {
+        return 1;
+      }
+      if (elapsed <= 0) {
+        return 0;
+      }
+      if (elapsed >= duration) {
+        return 1;
+      }
+      return elapsed / duration;
+    }
+    getInterpolatedRemoteTankState(tankState) {
+      if (!tankState || !tankState.id) {
+        return tankState;
+      }
+      if (!this.remoteInterpolation || !this.remoteInterpolation.previous || !this.remoteInterpolation.target) {
+        return tankState;
+      }
+      var prev = this.remoteInterpolation.previous[tankState.id];
+      var next = this.remoteInterpolation.target[tankState.id];
+      if (!prev || !next) {
+        return tankState;
+      }
+      var alpha = this.getRemoteInterpolationAlpha();
+      if (!(alpha > 0 && alpha < 1)) {
+        return tankState;
+      }
+      var clone = Object.assign({}, tankState);
+      clone.x = lerpNumber(prev.x, next.x, alpha);
+      clone.y = lerpNumber(prev.y, next.y, alpha);
+      clone.rotation = lerpNumber(prev.rotation, next.rotation, alpha);
+      return clone;
+    }
     buildStatePacket() {
       var current = this.captureState();
       var packet = null;
@@ -3548,6 +3658,7 @@
           this.remoteTankMap[id] = this.state.tanks[id];
         }
         this.remoteTankMeta = this.collectRemoteTankMeta();
+        this.resetRemoteInterpolation();
         if (typeof this.recomputeGlobalPowerups === "function") {
           this.recomputeGlobalPowerups();
         }
@@ -3594,6 +3705,7 @@
     }
     applyUnifiedDelta(json) {
       try {
+        var prevSnapshot = this.captureRemoteTankSnapshot();
         var d = typeof json === "string" ? JSON.parse(json) : json || {};
         var ts = d.tanks || {};
         var ps = d.powerups || {};
@@ -3814,6 +3926,7 @@
       }
       this.remoteTankMeta = this.collectRemoteTankMeta();
       this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
+      this.resetRemoteInterpolation();
       this.recomputeGlobalPowerups && this.recomputeGlobalPowerups();
       this.prerenderBackground();
       this.message = "Awaiting host updates...";
@@ -3822,6 +3935,7 @@
       if (typeof str !== "string" || !str || str[0] !== "D") {
         return;
       }
+      var prevSnapshot = this.captureRemoteTankSnapshot();
       var parts = str.split(",");
       var toInt = function(v) {
         var n = parseInt(v, 10);
@@ -3927,6 +4041,8 @@
       }
       this.remotePowerups = newPowerups;
       this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
+      var nextSnapshot = this.captureRemoteTankSnapshot();
+      this.updateRemoteInterpolation(prevSnapshot, nextSnapshot);
       var eventsBlock = parts[base + 3] || "";
       if (eventsBlock) {
         var entriesE = eventsBlock.split(";");
@@ -4219,13 +4335,14 @@
       if (tanks) {
         for (var i = 0; i < tanks.length; i++) {
           var t = tanks[i];
-          this.drawRemoteTank(t);
-          var tankId = t && t.id;
+          var renderTank = this.getInterpolatedRemoteTankState(t) || t;
+          this.drawRemoteTank(renderTank);
+          var tankId = renderTank && renderTank.id || t && t.id;
           var hasTeleport = tankId && this.teleportMirrors && this.teleportMirrors[tankId] || t && t.powerups && t.powerups.some(function(p2) {
             return p2 && p2.type === "TeleportPowerup";
           });
           if (hasTeleport) {
-            this.drawTeleportMirrorState(t);
+            this.drawTeleportMirrorState(renderTank);
           }
         }
       }

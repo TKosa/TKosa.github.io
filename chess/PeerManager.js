@@ -1,5 +1,10 @@
-// PeerManager.js
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { eventHub } from "./EventHub.js";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./SupabaseConfig.js";
+
+const BUILD_TAG = "relay-20260316a";
+const LAST_ROOM_KEY = "relay:lastRoom";
+const LAST_NICK_KEY = "relay:lastNick";
 
 export class PeerManager {
   constructor() {
@@ -7,146 +12,142 @@ export class PeerManager {
       return PeerManager.instance;
     }
 
-    this.peer = null; // Main Peer instance
-    this.connections = []; // Active connections
-    this.nickname = ""; // User's nickname
-    this.nicknames = {}; // Nicknames of connected peers
+    this.connections = [];
+    this.nickname = "";
+    this.nicknames = {};
+    this.currentRoomName = "";
+    this.sessionId = makeSessionId();
+    this.clientId = crypto.randomUUID();
+    this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    this.channel = null;
+    this.connected = false;
 
     PeerManager.instance = this;
   }
 
-  /**
-   * Initialize the peer connection.
-   * Attempts to host the room first. If it fails, connects to the room as a visitor.
-   */
-  initializePeer({ roomName, nickname = "" }) {
-    console.assert(
-      !this.peer,
-      "Peer already initialized. Cannot initialize again."
-    );
-
-    this.nickname = nickname;
-
-    // Attempt to host the room
-    this.peer = new Peer(roomName);
-
-
-    //If the name is available, we are the host
-    this.peer.on("open", (id) => {
-      console.log(`Hosting room "${roomName}". Your ID: ${id}`);
-      eventHub.emit("update-status-display", `Room created. Your ID: ${id}`);
-      addMessage(`You are hosting the chat room as "${this.nickname}".`);
-
-      this.peer.on("connection", (conn) => {
-        console.log("Player connected:", conn.peer);
-        eventHub.emit(
-          "update-status-display",
-          "Player connected: " + conn.peer
-        );
-        this.setupConnection(conn);
-
-       
-      });
-    });
-
-    // If the room is already taken, join as a visitor
-    this.peer.on("error", (err) => {
-      if (err.type === "peer-unavailable" || err.message.includes("taken")) {
-        this.joinRoom(roomName);
-      } else {
-        console.error("Peer setup Error:", err);
-      }
-    });
-  }
-
-  /**
-   * Join an existing room.
-   */
-  joinRoom(roomName) {
-    this.peer = new Peer(); // Create a new peer without specifying an ID
-
-    this.peer.on("open", (id) => {
-    
-
-      // Connect to the existing room
-      const conn = this.peer.connect(roomName);
-      this.setupConnection(conn);
-
-      conn.on("open", () => {
-          eventHub.emit(
-            "update-status-display",
-            `Joined room "${roomName}" as "${this.nickname}".`
-          );
-
-      });
-    });
-
-    this.peer.on("error", (err) => {
-      console.error("Error joining room:", err);
-    });
-  }
-
-  /**
-   * Set up a connection with another peer.
-   */
-  setupConnection(conn) {
-    if (!conn._handled) {
-      conn._handled = true;
-    } else {
-      return;
+  async initializePeer({ roomName, nickname = "" }) {
+    if (this.channel) {
+      await this.teardownPeer("reinitialize");
     }
 
-    this.connections.push(conn);
+    this.nickname = nickname || "Guest";
+    this.currentRoomName = roomName;
+    localStorage.setItem(LAST_ROOM_KEY, roomName);
+    localStorage.setItem(LAST_NICK_KEY, this.nickname);
+    dbg(this.sessionId, "initializeRelay", { roomName, nickname: this.nickname });
 
-    conn.on("data", (data) => {
-      handlePeerMessage(data, conn);
-    });
+    const channelName = `room-${roomName}`;
+    this.channel = this.supabase.channel(channelName);
 
-    conn.on("close", () => {
-      this.connections = this.connections.filter((c) => c !== conn);
-      eventHub.emit(
-        "update-status-display",
-        `Player disconnected: ${conn.peer}`
-      );
-    });
+    this.channel.on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "room_messages",
+        filter: `room=eq.${roomName}`,
+      },
+      (payload) => {
+        const row = payload.new || {};
+        if (!row.payload || row.sender === this.clientId) {
+          return;
+        }
+        handlePeerMessage(row.payload, { peer: row.sender });
+      }
+    );
 
-    conn.on("error", (err) => {
-      console.error("Connection error with", conn.peer, ":", err);
-    });
-
-    conn.on("open", () => {
-      // Send the nickname to the room
-      conn.send({
-        type: "nickname",
-        nickname: this.nickname,
-      });
-      addMessage(`User "${this.nickname}" has joined the chat.`);
+    this.channel.subscribe((status) => {
+      dbg(this.sessionId, "relay channel status", { status, channelName });
+      if (status === "SUBSCRIBED") {
+        this.connected = true;
+        eventHub.emit(
+          "update-status-display",
+          `Connected to relay room "${roomName}" as "${this.nickname}".`
+        );
+        this.broadcast({ type: "nickname", nickname: this.nickname });
+        eventHub.emit("relay-connected", { roomName, nickname: this.nickname });
+        this.loadRoomState();
+      }
     });
   }
 
-  /**
-   * Broadcast a message to all connected peers.
-   */
-  broadcast(message) {
-    this.connections.forEach((conn) => {
-      if (conn.open) {
-        conn.send(message);
-      }
+  async teardownPeer(reason = "manual") {
+    dbg(this.sessionId, "teardownRelay", { reason });
+    this.connected = false;
+    if (this.channel) {
+      await this.supabase.removeChannel(this.channel);
+      this.channel = null;
+    }
+  }
+
+  isConnected() {
+    return this.connected;
+  }
+
+  async broadcast(message) {
+    if (!this.connected || !this.currentRoomName) {
+      return;
+    }
+    const payload = {
+      room: this.currentRoomName,
+      sender: this.clientId,
+      type: message.type || "message",
+      payload: message,
+    };
+    const { error } = await this.supabase.from("room_messages").insert(payload);
+    if (error) {
+      console.error("Relay insert error:", error);
+      eventHub.emit("update-status-display", "Relay send failed.");
+    }
+  }
+
+  async saveRoomState(state) {
+    if (!this.connected || !this.currentRoomName) {
+      return;
+    }
+    const payload = {
+      room: this.currentRoomName,
+      state,
+      updated_by: this.clientId,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await this.supabase.from("room_state").upsert(payload, {
+      onConflict: "room",
     });
+    if (error) {
+      console.error("Relay state save error:", error);
+    }
+  }
+
+  async loadRoomState() {
+    if (!this.currentRoomName) {
+      return;
+    }
+    const { data, error } = await this.supabase
+      .from("room_state")
+      .select("state, updated_at")
+      .eq("room", this.currentRoomName)
+      .maybeSingle();
+    if (error) {
+      console.error("Relay state load error:", error);
+      return;
+    }
+    if (!data || !data.state) {
+      return;
+    }
+    eventHub.emit("room-state-loaded", data.state);
   }
 }
 
 export const peerManager = new PeerManager();
 
-// DOM Event Listeners
 document.addEventListener("DOMContentLoaded", () => {
+  console.log("[P2P BUILD]", BUILD_TAG, "mode=supabase-relay");
   const connectBtn = document.getElementById("connect-btn");
   const connectionKeyInput = document.getElementById("connection-key");
   const statusDisplay = document.getElementById("connection-status");
   const messageInput = document.getElementById("message-input");
-  
 
-  // Handle room connection
   connectBtn.addEventListener("click", () => {
     const roomName = sanitize(connectionKeyInput.value);
     const nickname =
@@ -161,25 +162,35 @@ document.addEventListener("DOMContentLoaded", () => {
     peerManager.initializePeer({ roomName, nickname });
   });
 
-  // Handle sending messages
+  const savedRoom = localStorage.getItem(LAST_ROOM_KEY) || "";
+  const savedNick = localStorage.getItem(LAST_NICK_KEY) || "";
+  if (savedRoom) {
+    connectionKeyInput.value = savedRoom;
+  }
+  if (savedNick) {
+    const nickInput = document.getElementById("nickname-field");
+    if (nickInput) {
+      nickInput.value = savedNick;
+    }
+  }
+  if (savedRoom) {
+    statusDisplay.textContent = "Reconnecting to room: " + savedRoom;
+    peerManager.initializePeer({ roomName: savedRoom, nickname: savedNick || "Guest" });
+  }
+
   function handleSendMessage() {
     const message = messageInput.value.trim();
     if (message) {
-      // Display the message in the user's chatbox
       addMessage(`You: ${message}`, "self-message");
-
-      // Broadcast the message to all connected peers
       peerManager.broadcast({
         type: "message",
         sender: peerManager.nickname,
         message: message,
       });
-
-      // Clear the input field
       messageInput.value = "";
     }
   }
-  
+
   const sendButton = document.getElementById("send-button");
   sendButton.addEventListener("click", handleSendMessage);
 
@@ -189,23 +200,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Update the status display dynamically
   eventHub.on("update-status-display", (message) => {
     statusDisplay.textContent = message;
   });
+
+  window.addEventListener("beforeunload", () => {
+    peerManager.teardownPeer("beforeunload");
+  });
 });
 
-/**
- * Sanitize input to prevent invalid characters.
- */
 function sanitize(name) {
-  // Remove leading/trailing whitespace and restrict to alphanumeric and specific characters
   return name.replace(/[^a-zA-Z0-9 _-]/g, "").trim();
 }
 
-/**
- * Add a message to the chat interface.
- */
 function addMessage(message, messageType = "notification-message") {
   const chatMessages = document.getElementById("chat-messages");
   const messageElement = document.createElement("div");
@@ -215,9 +222,6 @@ function addMessage(message, messageType = "notification-message") {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-/**
- * Handle incoming messages from peers.
- */
 function handlePeerMessage(data, conn) {
   switch (data.type) {
     case "message":
@@ -227,14 +231,25 @@ function handlePeerMessage(data, conn) {
       addMessage(`* ${data.message}`, "notification-message");
       break;
     case "nickname":
-      addMessage(
-        `* User "${data.nickname}" is now known.`,
-        "notification-message"
-      );
+      addMessage(`* User "${data.nickname}" is now known.`, "notification-message");
       peerManager.nicknames[conn.peer] = data.nickname;
       break;
     default:
-      eventHub.emit(data.type, data); // Forward rest of messages to Game.js like game reset
+      eventHub.emit(data.type, data);
       return;
   }
+}
+
+function dbg(sessionId, message, data = null) {
+  const ts = new Date().toISOString();
+  const prefix = `[P2P ${ts}][${sessionId}] ${message}`;
+  if (data) {
+    console.log(prefix, data);
+    return;
+  }
+  console.log(prefix);
+}
+
+function makeSessionId() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
