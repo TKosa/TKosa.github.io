@@ -228,14 +228,6 @@ export class Game {
 
   // Execute move. Update status. Send move over network if networked game. Update timers.
   makeLocalMove(sRow, sCol, dRow, dCol, newPiece = "") {
-    const expectedColor = this.chessGame.getCurrentPlayer();
-    const expectedSender = this.playerSlots[expectedColor];
-    if (expectedSender && expectedSender !== peerManager.clientId) {
-      return;
-    }
-    if (!this.playerSlots[expectedColor]) {
-      this.playerSlots[expectedColor] = peerManager.clientId;
-    }
     this.chessGame.executeMoveAndUpdateState(sRow, sCol, dRow, dCol, newPiece);
     this.lastMove = { from: { row: sRow, col: sCol }, to: { row: dRow, col: dCol } };
     eventHub.emit("my-move", { sRow, sCol, dRow, dCol, newPiece });
@@ -501,15 +493,6 @@ export class Game {
       return false;
     }
     const { sRow, sCol, dRow, dCol } = data.move;
-    const expectedColor = this.chessGame.getCurrentPlayer();
-    const sender = data._senderPeer || null;
-    const expectedSender = this.playerSlots[expectedColor];
-    if (expectedSender && sender && expectedSender !== sender) {
-      return false;
-    }
-    if (!expectedSender && sender) {
-      this.playerSlots[expectedColor] = sender;
-    }
     return this.chessGame.isValidMove(sRow, sCol, dRow, dCol);
   }
 
