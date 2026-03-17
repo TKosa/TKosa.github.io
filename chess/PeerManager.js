@@ -24,6 +24,7 @@ export class PeerManager {
     this.lastSeenMessageId = 0;
     this.seenMessageIds = new Set();
     this.pollTimer = null;
+    this.lastRoomStateUpdatedAt = null;
 
     PeerManager.instance = this;
   }
@@ -43,6 +44,7 @@ export class PeerManager {
     this.channel = this.supabase.channel(channelName);
     this.lastSeenMessageId = 0;
     this.seenMessageIds.clear();
+    this.lastRoomStateUpdatedAt = null;
 
     this.channel.on(
       "postgres_changes",
@@ -163,6 +165,7 @@ export class PeerManager {
     if (!data || !data.state) {
       return;
     }
+    this.lastRoomStateUpdatedAt = data.updated_at || this.lastRoomStateUpdatedAt;
     eventHub.emit("room-state-loaded", data.state);
   }
 
@@ -222,6 +225,26 @@ export class PeerManager {
         continue;
       }
       handlePeerMessage(row.payload, { peer: row.sender });
+    }
+
+    await this.pollRoomState();
+  }
+
+  async pollRoomState() {
+    if (!this.currentRoomName) {
+      return;
+    }
+    const { data, error } = await this.supabase
+      .from("room_state")
+      .select("state,updated_at")
+      .eq("room", this.currentRoomName)
+      .maybeSingle();
+    if (error || !data || !data.state) {
+      return;
+    }
+    if (!this.lastRoomStateUpdatedAt || data.updated_at > this.lastRoomStateUpdatedAt) {
+      this.lastRoomStateUpdatedAt = data.updated_at;
+      eventHub.emit("room-state-loaded", data.state);
     }
   }
 }

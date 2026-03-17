@@ -70,6 +70,25 @@ export class Game {
     eventHub.on("room-state-loaded", (state) => {
       this.applyNetworkState(state);
     });
+    eventHub.on("state-sync", (data) => {
+      if (data && data.state) {
+        this.applyNetworkState(data.state);
+      }
+    });
+    eventHub.on("state-request", () => {
+      if (!peerManager.isConnected()) {
+        return;
+      }
+      peerManager.broadcast({
+        type: "state-sync",
+        state: this.getSerializableState(),
+      });
+    });
+    eventHub.on("relay-connected", () => {
+      setTimeout(() => {
+        peerManager.broadcast({ type: "state-request" });
+      }, 300);
+    });
 
     this.backButton = document.getElementById("back-button");
     this.forwardButton = document.getElementById("forward-button");
