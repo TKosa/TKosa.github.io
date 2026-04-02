@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Workshop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="src/app.js"></script>
+</head>
+<body>
+    <div class="app-shell">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">SVG Editor</p>
+                <h1>Vector Workshop</h1>
+            </div>
+            <div class="toolbar" id="shape-toolbar">
+                <button type="button" data-shape="g">Group</button>
+                <button type="button" data-shape="rect">Rectangle</button>
+                <button type="button" data-shape="circle">Circle</button>
+                <button type="button" data-shape="ellipse">Ellipse</button>
+                <button type="button" data-shape="line">Line</button>
+                <button type="button" data-shape="text">Text</button>
+            </div>
+            <div class="toolbar toolbar-secondary">
+                <label class="toolbar-file">
+                    <input type="file" id="import-input" accept=".svg,image/svg+xml" hidden>
+                    <span>Import SVG</span>
+                </label>
+                <button type="button" id="duplicate-button">Duplicate</button>
+                <button type="button" id="delete-button">Delete</button>
+                <button type="button" id="export-button">Export SVG</button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <aside class="sidebar sidebar-left">
+                <section class="panel">
+                    <div class="panel-heading">
+                        <h2>Document</h2>
+                    </div>
+                    <label class="field">
+                        <span>Canvas Width</span>
+                        <input id="canvas-width" type="number" min="1" step="10">
+                    </label>
+                    <label class="field">
+                        <span>Canvas Height</span>
+                        <input id="canvas-height" type="number" min="1" step="10">
+                    </label>
+                    <button type="button" class="block-button" id="clear-button">Clear Canvas</button>
+                </section>
+            </aside>
+
+            <section class="canvas-section">
+                <div class="canvas-header">
+                    <span>Canvas</span>
+                    <span id="selection-summary">No selection</span>
+                </div>
+                <div class="canvas-stage" id="canvas-stage">
+                    <svg id="editor-canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+            </section>
+
+            <aside class="sidebar sidebar-right">
+                <section class="panel">
+                    <div class="panel-heading">
+                        <h2>SVG Source</h2>
+                    </div>
+                    <textarea id="source-input" spellcheck="false"></textarea>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-heading">
+                        <h2>Properties</h2>
+                    </div>
+                    <form id="property-form" class="property-form"></form>
+                    <p id="empty-state" class="empty-state">Select an element to edit its properties.</p>
+                </section>
+            </aside>
+        </main>
+    </div>
+</body>
+</html>
