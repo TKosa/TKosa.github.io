@@ -79,15 +79,17 @@ export function setElementTransform(element, transform) {
 
 export function parsePointList(element) {
     const points = element.getAttribute('points') ?? '';
-    const values = points
-        .trim()
-        .split(/[\s,]+/)
-        .map(Number)
-        .filter((value) => Number.isFinite(value));
     const result = [];
+    const values = points.trim().split(/[\s,]+/);
 
     for (let index = 0; index < values.length - 1; index += 2) {
-        result.push({ x: values[index], y: values[index + 1] });
+        const x = Number(values[index]);
+        const y = Number(values[index + 1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            continue;
+        }
+
+        result.push({ x, y });
     }
 
     return result;

@@ -44,11 +44,16 @@ export function createCanvasController({ store, refs, status }) {
             return;
         }
 
+        if (event.button !== 0) {
+            return;
+        }
+
         const editorId = handleNode.getAttribute('data-vertex-editor-id');
         const index = Number(handleNode.getAttribute('data-vertex-index'));
         const selected = editorId ? findElementByEditorId(refs.canvas, editorId) : null;
         const matrix = selected?.getCTM();
-        if (!selected || !Number.isInteger(index) || !matrix) {
+        const inverseMatrix = invertMatrix(toDomMatrix(matrix));
+        if (!selected || !Number.isInteger(index) || !matrix || !inverseMatrix) {
             return;
         }
 
@@ -60,7 +65,7 @@ export function createCanvasController({ store, refs, status }) {
             elementName: getElementLabel(selected),
             pointerId: event.pointerId,
             index,
-            inverseMatrix: toDomMatrix(matrix)?.inverse() ?? null
+            inverseMatrix
         };
         refs.canvas.setPointerCapture(event.pointerId);
     };
@@ -178,7 +183,7 @@ export function createCanvasController({ store, refs, status }) {
         if (dragState.mode === 'move-vertex') {
             const point = getSvgPoint(event, refs.canvas);
             const localPoint = toLocalPoint(point, dragState.inverseMatrix);
-            if (!localPoint) {
+            if (!localPoint || !Number.isFinite(localPoint.x) || !Number.isFinite(localPoint.y)) {
                 return;
             }
 
@@ -234,6 +239,10 @@ export function createCanvasController({ store, refs, status }) {
     }, { passive: false });
 
     refs.canvasStage.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) {
+            return;
+        }
+
         const target = event.target instanceof SVGElement ? event.target.closest('[data-editor-id]') : null;
         if (!target || !isInteractableElement(target)) {
             store.selectElement(null);
@@ -268,6 +277,7 @@ export function createCanvasController({ store, refs, status }) {
 
     refs.canvasStage.addEventListener('pointermove', updateHoverCoordinates);
     refs.canvasStage.addEventListener('pointermove', handleDragMove);
+    refs.canvasStage.addEventListener('contextmenu', (event) => event.preventDefault());
 
     const endDrag = (event) => {
         if (!dragState || dragState.pointerId !== event.pointerId) {
@@ -562,6 +572,7 @@ function createVertexHandle(canvas, worldPoint, localPoint, editorId, index, siz
     handleNode.style.cursor = 'move';
     handleNode.addEventListener('pointerdown', (event) => beginVertexDrag(event, handleNode));
     handleNode.addEventListener('dblclick', (event) => removeVertexFromHandle(event, handleNode));
+    handleNode.addEventListener('contextmenu', (event) => removeVertexFromHandle(event, handleNode));
     return handleNode;
 }
 
@@ -615,6 +626,14 @@ function getMovingPoint(box, handle) {
 function getResizeTransform(dragState, point) {
     const scaleX = getAxisScale(point.x, dragState.anchor.x, dragState.movingPoint.x, hasHorizontalResize(dragState.handle));
     const scaleY = getAxisScale(point.y, dragState.anchor.y, dragState.movingPoint.y, hasVerticalResize(dragState.handle));
+    if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY)) {
+        return null;
+    }
+
+    if ((hasHorizontalResize(dragState.handle) && Math.abs(scaleX) < 0.0001)
+        || (hasVerticalResize(dragState.handle) && Math.abs(scaleY) < 0.0001)) {
+        return null;
+    }
 
     if (approximatelyEqual(scaleX, 1) && approximatelyEqual(scaleY, 1)) {
         return dragState.originalTransform;
@@ -699,6 +718,22 @@ function toDomMatrix(matrix) {
     return new DOMMatrix([matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f]);
 }
 
+function invertMatrix(matrix) {
+    if (!matrix) {
+        return null;
+    }
+
+    try {
+        const inverse = matrix.inverse();
+        return [inverse.a, inverse.b, inverse.c, inverse.d, inverse.e, inverse.f].every(Number.isFinite)
+            ? inverse
+            : null;
+    } catch (error) {
+        void error;
+        return null;
+    }
+}
+
 function toTransformMatrix(matrix) {
     const values = [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f]
         .map((value) => (Math.abs(value) < 0.0000001 ? 0 : Number(value.toFixed(6))));
@@ -710,5 +745,10 @@ function toLocalPoint(point, inverseMatrix) {
         return null;
     }
 
-    return new DOMPoint(point.x, point.y).matrixTransform(inverseMatrix);
+    const localPoint = new DOMPoint(point.x, point.y).matrixTransform(inverseMatrix);
+    if (!Number.isFinite(localPoint.x) || !Number.isFinite(localPoint.y)) {
+        return null;
+    }
+
+    return localPoint;
 }
