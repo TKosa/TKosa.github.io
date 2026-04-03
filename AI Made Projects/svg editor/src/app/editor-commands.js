@@ -5,6 +5,22 @@ export function createEditorCommands({ store, status }) {
         addShape(type) {
             store.addElement(type);
         },
+        undo() {
+            if (store.undo()) {
+                status.setMessage('Change undone');
+                return true;
+            }
+
+            return false;
+        },
+        redo() {
+            if (store.redo()) {
+                status.setMessage('Change restored');
+                return true;
+            }
+
+            return false;
+        },
         duplicateSelection() {
             if (store.duplicateSelectedElement()) {
                 status.setMessage('Element duplicated');

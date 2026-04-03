@@ -16,7 +16,7 @@ export function startEditorApp(root = document) {
     const commands = createEditorCommands(appContext);
     const controllers = createControllers({ ...appContext, commands });
 
-    registerKeyboardShortcuts(commands, refs);
+    registerKeyboardShortcuts(commands, refs, store);
 
     store.subscribe((state) => {
         controllers.forEach((controller) => controller.render(state));

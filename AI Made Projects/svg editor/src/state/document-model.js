@@ -12,10 +12,19 @@ import { insertClipboardClone, nudgeElement, refreshElementIds, sanitizeClipboar
 import { parseSvgString } from '../svg/parser.js';
 import { serializeSvg } from '../svg/serializer.js';
 
+const HISTORY_DEBOUNCE_MS = 250;
+const HISTORY_LIMIT = 100;
+
 export function createStore() {
     let state = createInitialState();
     const listeners = new Set();
     let clipboardSnapshot = null;
+    const history = {
+        present: createHistoryEntry(state),
+        undoStack: [],
+        redoStack: [],
+        timerId: null
+    };
 
     function notify() {
         listeners.forEach((listener) => listener(state));
@@ -34,13 +43,73 @@ export function createStore() {
         return selection ?? null;
     }
 
-    function commitSvg(svgRoot, selection = state.selectedId) {
+    function createHistoryEntry(snapshotState = state) {
+        return {
+            svgRoot: cloneSvgRoot(snapshotState.svgRoot),
+            selectedId: snapshotState.selectedId
+        };
+    }
+
+    function clearHistoryTimer() {
+        if (history.timerId !== null) {
+            window.clearTimeout(history.timerId);
+            history.timerId = null;
+        }
+    }
+
+    function hasPendingHistoryChanges() {
+        return !history.present.svgRoot.isEqualNode(state.svgRoot);
+    }
+
+    function pushHistoryEntry(stack, entry) {
+        stack.push(entry);
+        if (stack.length > HISTORY_LIMIT) {
+            stack.shift();
+        }
+    }
+
+    function commitPendingHistory() {
+        clearHistoryTimer();
+        if (!hasPendingHistoryChanges()) {
+            return false;
+        }
+
+        pushHistoryEntry(history.undoStack, history.present);
+        history.present = createHistoryEntry();
+        return true;
+    }
+
+    function scheduleHistoryCommit() {
+        clearHistoryTimer();
+        history.timerId = window.setTimeout(() => {
+            history.timerId = null;
+            commitPendingHistory();
+        }, HISTORY_DEBOUNCE_MS);
+    }
+
+    function restoreHistoryEntry(entry) {
+        commitSvg(cloneSvgRoot(entry.svgRoot), entry.selectedId, { recordHistory: false });
+    }
+
+    function commitSvg(svgRoot, selection = state.selectedId, options = {}) {
+        const { recordHistory = true } = options;
         assignEditorIds(svgRoot);
+        const resolvedSelection = resolveSelection(selection);
+        const svgChanged = !state.svgRoot.isEqualNode(svgRoot);
+
+        if (recordHistory && svgChanged) {
+            history.redoStack = [];
+        }
+
         setState({
             svgRoot,
-            selectedId: resolveSelection(selection),
+            selectedId: resolvedSelection,
             nextElementId: computeNextElementId(svgRoot)
         });
+
+        if (recordHistory && svgChanged) {
+            scheduleHistoryCommit();
+        }
     }
 
     function updateSvg(mutator, selection = state.selectedId) {
@@ -185,6 +254,47 @@ export function createStore() {
         },
         serialize() {
             return serializeSvg(state.svgRoot);
+        },
+        undo() {
+            clearHistoryTimer();
+
+            if (hasPendingHistoryChanges()) {
+                pushHistoryEntry(history.redoStack, createHistoryEntry());
+                restoreHistoryEntry(history.present);
+                return true;
+            }
+
+            const previous = history.undoStack.pop();
+            if (!previous) {
+                return false;
+            }
+
+            pushHistoryEntry(history.redoStack, createHistoryEntry());
+            history.present = previous;
+            restoreHistoryEntry(previous);
+            return true;
+        },
+        redo() {
+            clearHistoryTimer();
+            if (hasPendingHistoryChanges()) {
+                return false;
+            }
+
+            const next = history.redoStack.pop();
+            if (!next) {
+                return false;
+            }
+
+            pushHistoryEntry(history.undoStack, history.present);
+            history.present = next;
+            restoreHistoryEntry(next);
+            return true;
+        },
+        canUndo() {
+            return hasPendingHistoryChanges() || history.undoStack.length > 0;
+        },
+        canRedo() {
+            return !hasPendingHistoryChanges() && history.redoStack.length > 0;
         }
     };
 }
