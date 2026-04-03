@@ -68,6 +68,15 @@ export function insertClipboardClone(svgRoot, target, clone) {
     target.parentNode?.insertBefore(clone, target.nextSibling);
 }
 
+export function setElementTransform(element, transform) {
+    if (!transform) {
+        element.removeAttribute('transform');
+        return;
+    }
+
+    element.setAttribute('transform', transform);
+}
+
 function bumpAttribute(element, name, delta) {
     const current = Number.parseFloat(element.getAttribute(name) ?? '0');
     element.setAttribute(name, String(current + delta));

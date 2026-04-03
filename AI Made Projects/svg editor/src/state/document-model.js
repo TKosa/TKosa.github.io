@@ -8,7 +8,7 @@ import {
     findElementByEditorId,
     getFirstSelectableEditorId
 } from '../svg/document-dom.js';
-import { insertClipboardClone, nudgeElement, refreshElementIds, sanitizeClipboardElement, translateElement } from '../svg/element-operations.js';
+import { insertClipboardClone, nudgeElement, refreshElementIds, sanitizeClipboardElement, setElementTransform, translateElement } from '../svg/element-operations.js';
 import { parseSvgString } from '../svg/parser.js';
 import { serializeSvg } from '../svg/serializer.js';
 
@@ -247,6 +247,16 @@ export function createStore() {
                 }
 
                 translateElement(element, deltaX, deltaY);
+            });
+        },
+        setElementTransform(editorId, transform) {
+            updateSvg((svgRoot) => {
+                const element = findElementByEditorId(svgRoot, editorId);
+                if (!element) {
+                    return;
+                }
+
+                setElementTransform(element, transform);
             });
         },
         clear() {
