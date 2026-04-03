@@ -235,8 +235,10 @@ function getSvgPoint(event, svg) {
         return { x: 0, y: 0 };
     }
 
+    const viewBox = svg.viewBox.baseVal;
+
     return {
-        x: toNumber(((event.clientX - rect.left) / rect.width) * svg.viewBox.baseVal.width, 0),
-        y: toNumber(((event.clientY - rect.top) / rect.height) * svg.viewBox.baseVal.height, 0)
+        x: toNumber(viewBox.x + (((event.clientX - rect.left) / rect.width) * viewBox.width), 0),
+        y: toNumber(viewBox.y + (((event.clientY - rect.top) / rect.height) * viewBox.height), 0)
     };
 }
