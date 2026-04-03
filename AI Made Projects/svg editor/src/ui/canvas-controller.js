@@ -20,14 +20,21 @@ export function createCanvasController({ store, refs, status }) {
     let panY = 0;
     let viewportInitialized = false;
 
-    const applyElementTransform = (editorId, transform) => {
+    const getElementLabel = (element) => element.tagName.toLowerCase();
+
+    const formatPointArgs = (elementName, ...values) => [
+        elementName,
+        ...values.map((value) => Math.round(value))
+    ];
+
+    const applyElementTransform = (actionName, actionArgs, editorId, transform) => {
         if (typeof store.setElementTransform === 'function') {
-            store.setElementTransform(editorId, transform);
+            store.setElementTransform(actionName, actionArgs, editorId, transform);
             return;
         }
 
         if (typeof store.updateElementAttribute === 'function') {
-            store.updateElementAttribute(editorId, 'transform', transform ?? '');
+            store.updateElementAttribute(actionName, actionArgs, editorId, 'transform', transform ?? '');
         }
     };
 
@@ -59,7 +66,8 @@ export function createCanvasController({ store, refs, status }) {
             movingPoint: getMovingPoint(box, handle),
             currentMatrix,
             parentMatrix,
-            originalTransform: selected.getAttribute('transform') ?? ''
+            originalTransform: selected.getAttribute('transform') ?? '',
+            elementName: getElementLabel(selected)
         };
         refs.canvas.setPointerCapture(event.pointerId);
     };
@@ -93,7 +101,12 @@ export function createCanvasController({ store, refs, status }) {
                 return;
             }
 
-            applyElementTransform(dragState.editorId, transform);
+            applyElementTransform(
+                'resize',
+                [dragState.elementName, dragState.handle, Math.round(point.x), Math.round(point.y)],
+                dragState.editorId,
+                transform
+            );
             return;
         }
 
@@ -101,7 +114,7 @@ export function createCanvasController({ store, refs, status }) {
         if (dragState.transformDrag) {
             const transform = getTranslateTransform(dragState, point);
             if (transform !== null) {
-                applyElementTransform(dragState.editorId, transform);
+                applyElementTransform('drag', formatPointArgs(dragState.elementName, point.x, point.y), dragState.editorId, transform);
             }
             return;
         }
@@ -112,7 +125,7 @@ export function createCanvasController({ store, refs, status }) {
             return;
         }
 
-        store.moveElement(dragState.editorId, deltaX, deltaY);
+        store.moveElement('drag', formatPointArgs(dragState.elementName, point.x, point.y), dragState.editorId, deltaX, deltaY);
         dragState.previous = point;
     };
 
@@ -162,6 +175,7 @@ export function createCanvasController({ store, refs, status }) {
         dragState = {
             mode: 'move-element',
             editorId,
+            elementName: getElementLabel(target),
             pointerId: event.pointerId,
             previous: point,
             transformDrag

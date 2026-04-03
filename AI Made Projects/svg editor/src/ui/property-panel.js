@@ -47,7 +47,7 @@ export function createPropertyPanel({ store, refs }) {
             return;
         }
 
-        store.updateElementAttribute(editorId, attributeName, target.value);
+        store.updateElementAttribute('set-attribute', [editorId, attributeName, target.value], editorId, attributeName, target.value);
     };
 
     refs.form.addEventListener('input', (event) => {

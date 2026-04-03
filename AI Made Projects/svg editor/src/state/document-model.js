@@ -35,6 +35,25 @@ export function createStore() {
         notify();
     }
 
+    function formatActionArgs(actionArgs = []) {
+        return actionArgs
+            .filter((value) => value !== null && value !== undefined && value !== '')
+            .map((value) => String(value).trim())
+            .filter(Boolean);
+    }
+
+    function createAction(actionName, actionArgs = []) {
+        if (typeof actionName !== 'string' || actionName.trim() === '') {
+            throw new Error('SVG mutations that record history require a non-empty action name.');
+        }
+
+        return {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: actionName.trim(),
+            args: formatActionArgs(actionArgs)
+        };
+    }
+
     function resolveSelection(selection) {
         if (selection instanceof Element) {
             return selection.getAttribute('data-editor-id');
@@ -92,19 +111,24 @@ export function createStore() {
     }
 
     function commitSvg(svgRoot, selection = state.selectedId, options = {}) {
-        const { recordHistory = true } = options;
+        const { recordHistory = true, actionName = null, actionArgs = [] } = options;
         assignEditorIds(svgRoot);
         const resolvedSelection = resolveSelection(selection);
         const svgChanged = !state.svgRoot.isEqualNode(svgRoot);
+        const action = recordHistory && svgChanged
+            ? createAction(actionName, actionArgs)
+            : state.lastAction;
 
         if (recordHistory && svgChanged) {
             history.redoStack = [];
         }
 
         setState({
+            ...state,
             svgRoot,
             selectedId: resolvedSelection,
-            nextElementId: computeNextElementId(svgRoot)
+            nextElementId: computeNextElementId(svgRoot),
+            lastAction: action
         });
 
         if (recordHistory && svgChanged) {
@@ -112,10 +136,10 @@ export function createStore() {
         }
     }
 
-    function updateSvg(mutator, selection = state.selectedId) {
+    function updateSvg(actionName, actionArgs, mutator, selection = state.selectedId) {
         const svgRoot = cloneSvgRoot(state.svgRoot);
         mutator(svgRoot);
-        commitSvg(svgRoot, selection);
+        commitSvg(svgRoot, selection, { actionName, actionArgs });
     }
 
     return {
@@ -133,10 +157,10 @@ export function createStore() {
                 selectedId: editorId
             });
         },
-        importFromString(source) {
-            commitSvg(parseSvgString(source), null);
+        importFromString(actionName, actionArgs, source) {
+            commitSvg(parseSvgString(source), null, { actionName, actionArgs });
         },
-        addElement(type) {
+        addElement(actionName, actionArgs, type) {
             const svgRoot = cloneSvgRoot(state.svgRoot);
             const element = createShapeElement(type);
 
@@ -147,9 +171,9 @@ export function createStore() {
             const selected = findElementByEditorId(svgRoot, state.selectedId);
             const parent = selected && selected.tagName.toLowerCase() === 'g' ? selected : svgRoot;
             parent.appendChild(element);
-            commitSvg(svgRoot, element);
+            commitSvg(svgRoot, element, { actionName, actionArgs });
         },
-        deleteSelectedElement() {
+        deleteSelectedElement(actionName, actionArgs) {
             if (!state.selectedId) {
                 return false;
             }
@@ -161,10 +185,10 @@ export function createStore() {
             }
 
             selected.remove();
-            commitSvg(svgRoot, null);
+            commitSvg(svgRoot, null, { actionName, actionArgs });
             return true;
         },
-        duplicateSelectedElement() {
+        duplicateSelectedElement(actionName, actionArgs) {
             if (!state.selectedId) {
                 return false;
             }
@@ -179,7 +203,7 @@ export function createStore() {
             refreshElementIds(clone, state.nextElementId);
             nudgeElement(clone, 24, 24);
             selected.parentNode?.insertBefore(clone, selected.nextSibling);
-            commitSvg(svgRoot, clone);
+            commitSvg(svgRoot, clone, { actionName, actionArgs });
             return true;
         },
         copySelectedElement() {
@@ -197,7 +221,7 @@ export function createStore() {
             clipboardSnapshot = sanitizeClipboardElement(selected.cloneNode(true));
             return true;
         },
-        pasteClipboardElement() {
+        pasteClipboardElement(actionName, actionArgs) {
             if (!clipboardSnapshot) {
                 return false;
             }
@@ -210,18 +234,18 @@ export function createStore() {
             const target = findElementByEditorId(svgRoot, state.selectedId);
             insertClipboardClone(svgRoot, target, clone);
             clipboardSnapshot = sanitizeClipboardElement(clone.cloneNode(true));
-            commitSvg(svgRoot, clone);
+            commitSvg(svgRoot, clone, { actionName, actionArgs });
             return true;
         },
-        updateCanvasSize(width, height) {
-            updateSvg((svgRoot) => {
+        updateCanvasSize(actionName, actionArgs, width, height) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
                 svgRoot.setAttribute('width', String(width));
                 svgRoot.setAttribute('height', String(height));
                 svgRoot.setAttribute('viewBox', `0 0 ${width} ${height}`);
             });
         },
-        updateElementAttribute(editorId, name, value) {
-            updateSvg((svgRoot) => {
+        updateElementAttribute(actionName, actionArgs, editorId, name, value) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
                 const element = findElementByEditorId(svgRoot, editorId);
                 if (!element) {
                     return;
@@ -239,8 +263,8 @@ export function createStore() {
                 }
             });
         },
-        moveElement(editorId, deltaX, deltaY) {
-            updateSvg((svgRoot) => {
+        moveElement(actionName, actionArgs, editorId, deltaX, deltaY) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
                 const element = findElementByEditorId(svgRoot, editorId);
                 if (!element) {
                     return;
@@ -249,8 +273,8 @@ export function createStore() {
                 translateElement(element, deltaX, deltaY);
             });
         },
-        setElementTransform(editorId, transform) {
-            updateSvg((svgRoot) => {
+        setElementTransform(actionName, actionArgs, editorId, transform) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
                 const element = findElementByEditorId(svgRoot, editorId);
                 if (!element) {
                     return;
@@ -259,8 +283,8 @@ export function createStore() {
                 setElementTransform(element, transform);
             });
         },
-        clear() {
-            commitSvg(createBaseSvgRoot(), null);
+        clear(actionName, actionArgs) {
+            commitSvg(createBaseSvgRoot(), null, { actionName, actionArgs });
         },
         serialize() {
             return serializeSvg(state.svgRoot);
@@ -315,6 +339,7 @@ export function createInitialState() {
     return {
         svgRoot,
         selectedId: getFirstSelectableEditorId(svgRoot),
-        nextElementId: computeNextElementId(svgRoot)
+        nextElementId: computeNextElementId(svgRoot),
+        lastAction: null
     };
 }

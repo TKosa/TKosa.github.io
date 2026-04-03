@@ -3,7 +3,7 @@ import { downloadTextFile } from '../core/utils.js';
 export function createEditorCommands({ store, status }) {
     return {
         addShape(type) {
-            store.addElement(type);
+            store.addElement('add-shape', [type], type);
         },
         undo() {
             if (store.undo()) {
@@ -22,12 +22,14 @@ export function createEditorCommands({ store, status }) {
             return false;
         },
         duplicateSelection() {
-            if (store.duplicateSelectedElement()) {
+            const selectedId = store.getState().selectedId;
+            if (store.duplicateSelectedElement('duplicate-selection', [selectedId])) {
                 status.setMessage('Element duplicated');
             }
         },
         deleteSelection() {
-            if (store.deleteSelectedElement()) {
+            const selectedId = store.getState().selectedId;
+            if (store.deleteSelectedElement('delete-selection', [selectedId])) {
                 status.setMessage('Element deleted');
             }
         },
@@ -40,7 +42,8 @@ export function createEditorCommands({ store, status }) {
             return false;
         },
         pasteSelection() {
-            if (store.pasteClipboardElement()) {
+            const selectedId = store.getState().selectedId;
+            if (store.pasteClipboardElement('paste-selection', [selectedId])) {
                 status.setMessage('Element pasted');
                 return true;
             }
@@ -48,22 +51,22 @@ export function createEditorCommands({ store, status }) {
             return false;
         },
         clearDocument() {
-            store.clear();
+            store.clear('clear-document', []);
             status.setMessage('Canvas cleared');
         },
         importSvgText(source) {
-            store.importFromString(source);
+            store.importFromString('import-svg', ['file'], source);
             status.setMessage('SVG imported');
         },
         updateSourceDocument(source) {
-            store.importFromString(source);
+            store.importFromString('edit-source', [source.length], source);
         },
         exportDocument() {
             downloadTextFile('vector-workshop.svg', store.serialize());
             status.setMessage('SVG exported');
         },
         resizeCanvas(width, height) {
-            store.updateCanvasSize(width, height);
+            store.updateCanvasSize('resize-canvas', [width, height], width, height);
         }
     };
 }
