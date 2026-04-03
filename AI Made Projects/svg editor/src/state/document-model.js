@@ -8,7 +8,17 @@ import {
     findElementByEditorId,
     getFirstSelectableEditorId
 } from '../svg/document-dom.js';
-import { insertClipboardClone, nudgeElement, refreshElementIds, sanitizeClipboardElement, setElementTransform, translateElement } from '../svg/element-operations.js';
+import {
+    insertClipboardClone,
+    insertPoint,
+    movePoint,
+    nudgeElement,
+    refreshElementIds,
+    removePoint,
+    sanitizeClipboardElement,
+    setElementTransform,
+    translateElement
+} from '../svg/element-operations.js';
 import { parseSvgString } from '../svg/parser.js';
 import { serializeSvg } from '../svg/serializer.js';
 
@@ -282,6 +292,38 @@ export function createStore() {
 
                 setElementTransform(element, transform);
             });
+        },
+        moveElementPoint(actionName, actionArgs, editorId, index, x, y) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                const element = findElementByEditorId(svgRoot, editorId);
+                if (!element) {
+                    return;
+                }
+
+                movePoint(element, index, x, y);
+            });
+        },
+        insertElementPoint(actionName, actionArgs, editorId, index, x, y) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                const element = findElementByEditorId(svgRoot, editorId);
+                if (!element) {
+                    return;
+                }
+
+                insertPoint(element, index, x, y);
+            });
+        },
+        removeElementPoint(actionName, actionArgs, editorId, index) {
+            let didRemove = false;
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                const element = findElementByEditorId(svgRoot, editorId);
+                if (!element) {
+                    return;
+                }
+
+                didRemove = removePoint(element, index);
+            });
+            return didRemove;
         },
         clear(actionName, actionArgs) {
             commitSvg(createBaseSvgRoot(), null, { actionName, actionArgs });

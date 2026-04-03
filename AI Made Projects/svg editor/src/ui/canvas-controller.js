@@ -1,5 +1,6 @@
 import { toNumber } from '../core/utils.js';
 import { findElementByEditorId, getCanvasMetrics, isInteractableElement } from '../state/document-selectors.js';
+import { parsePointList } from '../svg/element-operations.js';
 
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const HANDLE_CURSORS = {
@@ -36,6 +37,70 @@ export function createCanvasController({ store, refs, status }) {
         if (typeof store.updateElementAttribute === 'function') {
             store.updateElementAttribute(actionName, actionArgs, editorId, 'transform', transform ?? '');
         }
+    };
+
+    const beginVertexDrag = (event, handleNode) => {
+        if (!(handleNode instanceof SVGElement)) {
+            return;
+        }
+
+        const editorId = handleNode.getAttribute('data-vertex-editor-id');
+        const index = Number(handleNode.getAttribute('data-vertex-index'));
+        const selected = editorId ? findElementByEditorId(refs.canvas, editorId) : null;
+        const matrix = selected?.getCTM();
+        if (!selected || !Number.isInteger(index) || !matrix) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        dragState = {
+            mode: 'move-vertex',
+            editorId,
+            elementName: getElementLabel(selected),
+            pointerId: event.pointerId,
+            index,
+            inverseMatrix: toDomMatrix(matrix)?.inverse() ?? null
+        };
+        refs.canvas.setPointerCapture(event.pointerId);
+    };
+
+    const insertVertexAtHandle = (event, handleNode) => {
+        if (!(handleNode instanceof SVGElement)) {
+            return;
+        }
+
+        const editorId = handleNode.getAttribute('data-edge-editor-id');
+        const insertIndex = Number(handleNode.getAttribute('data-edge-insert-index'));
+        const x = Number(handleNode.getAttribute('data-edge-local-x'));
+        const y = Number(handleNode.getAttribute('data-edge-local-y'));
+        const selected = editorId ? findElementByEditorId(refs.canvas, editorId) : null;
+        if (!selected || !Number.isInteger(insertIndex) || !Number.isFinite(x) || !Number.isFinite(y)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        store.insertElementPoint('insert-vertex', [getElementLabel(selected), insertIndex, Math.round(x), Math.round(y)], editorId, insertIndex, x, y);
+    };
+
+    const removeVertexFromHandle = (event, handleNode) => {
+        if (!(handleNode instanceof SVGElement)) {
+            return;
+        }
+
+        const editorId = handleNode.getAttribute('data-vertex-editor-id');
+        const index = Number(handleNode.getAttribute('data-vertex-index'));
+        const x = Number(handleNode.getAttribute('data-vertex-local-x'));
+        const y = Number(handleNode.getAttribute('data-vertex-local-y'));
+        const selected = editorId ? findElementByEditorId(refs.canvas, editorId) : null;
+        if (!selected || !Number.isInteger(index)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        store.removeElementPoint('remove-vertex', [getElementLabel(selected), index, Math.round(x), Math.round(y)], editorId, index);
     };
 
     const beginResizeDrag = (event, handleNode) => {
@@ -106,6 +171,24 @@ export function createCanvasController({ store, refs, status }) {
                 [dragState.elementName, dragState.handle, Math.round(point.x), Math.round(point.y)],
                 dragState.editorId,
                 transform
+            );
+            return;
+        }
+
+        if (dragState.mode === 'move-vertex') {
+            const point = getSvgPoint(event, refs.canvas);
+            const localPoint = toLocalPoint(point, dragState.inverseMatrix);
+            if (!localPoint) {
+                return;
+            }
+
+            store.moveElementPoint(
+                'move-vertex',
+                [dragState.elementName, dragState.index, Math.round(localPoint.x), Math.round(localPoint.y)],
+                dragState.editorId,
+                dragState.index,
+                localPoint.x,
+                localPoint.y
             );
             return;
         }
@@ -199,6 +282,10 @@ export function createCanvasController({ store, refs, status }) {
             refs.canvas.releasePointerCapture(event.pointerId);
         }
 
+        if (dragState.mode === 'move-vertex' && refs.canvas.hasPointerCapture(event.pointerId)) {
+            refs.canvas.releasePointerCapture(event.pointerId);
+        }
+
         if (dragState.mode === 'resize-element' && refs.canvas.hasPointerCapture(event.pointerId)) {
             refs.canvas.releasePointerCapture(event.pointerId);
         }
@@ -215,7 +302,12 @@ export function createCanvasController({ store, refs, status }) {
 
     return {
         render(state) {
-            renderSvg(refs.canvas, state, zoom, beginResizeDrag);
+            renderSvg(refs.canvas, state, zoom, {
+                beginResizeDrag,
+                beginVertexDrag,
+                insertVertexAtHandle,
+                removeVertexFromHandle
+            });
             initializeViewportIfNeeded(refs, state, zoom, viewportInitialized, (nextPanX, nextPanY) => {
                 panX = nextPanX;
                 panY = nextPanY;
@@ -226,11 +318,11 @@ export function createCanvasController({ store, refs, status }) {
     };
 }
 
-function renderSvg(canvas, state, zoom, beginResizeDrag) {
+function renderSvg(canvas, state, zoom, overlayHandlers) {
     syncSvgRoot(canvas, state.svgRoot);
     const selected = findElementByEditorId(canvas, state.selectedId);
     if (selected) {
-        renderSelectionOverlay(canvas, selected, state.selectedId, zoom, beginResizeDrag);
+        renderSelectionOverlay(canvas, selected, state.selectedId, zoom, overlayHandlers);
     }
 }
 
@@ -273,7 +365,7 @@ function initializeViewportIfNeeded(refs, state, zoom, viewportInitialized, setV
     );
 }
 
-function renderSelectionOverlay(canvas, selected, editorId, zoom, beginResizeDrag) {
+function renderSelectionOverlay(canvas, selected, editorId, zoom, overlayHandlers) {
     try {
         const box = getTransformedBox(selected);
         if (!Number.isFinite(box.x) || !Number.isFinite(box.y) || box.width < 0 || box.height < 0) {
@@ -300,16 +392,38 @@ function renderSelectionOverlay(canvas, selected, editorId, zoom, beginResizeDra
 
         const handleSize = 12 / Math.max(zoom, 0.001);
         HANDLE_DIRECTIONS.forEach((handle) => {
-            overlay.appendChild(createResizeHandle(canvas, box, handle, editorId, handleSize, beginResizeDrag));
+            overlay.appendChild(createResizeHandle(canvas, box, handle, editorId, handleSize, overlayHandlers.beginResizeDrag));
         });
 
         canvas.appendChild(overlay);
+
+        if (isPointEditableElement(selected)) {
+            try {
+                renderPointEditingOverlay(
+                    canvas,
+                    overlay,
+                    selected,
+                    editorId,
+                    handleSize,
+                    overlayHandlers.beginVertexDrag,
+                    overlayHandlers.insertVertexAtHandle,
+                    overlayHandlers.removeVertexFromHandle
+                );
+            } catch (error) {
+                void error;
+            }
+        }
     } catch (error) {
         void error;
     }
 }
 
 function getTransformedBox(element) {
+    const tag = element.tagName.toLowerCase();
+    if (tag === 'polygon' || tag === 'polyline') {
+        return getPointElementBox(element);
+    }
+
     const box = element.getBBox();
     const matrix = element.getCTM();
 
@@ -326,6 +440,31 @@ function getTransformedBox(element) {
 
     const xs = corners.map((point) => point.x);
     const ys = corners.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+
+    return {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY
+    };
+}
+
+function getPointElementBox(element) {
+    const matrix = element.getCTM();
+    const points = parsePointList(element);
+    if (points.length === 0) {
+        return element.getBBox();
+    }
+
+    const transformedPoints = matrix
+        ? points.map((point) => new DOMPoint(point.x, point.y).matrixTransform(matrix))
+        : points;
+    const xs = transformedPoints.map((point) => point.x);
+    const ys = transformedPoints.map((point) => point.y);
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
     const maxX = Math.max(...xs);
@@ -370,6 +509,86 @@ function createResizeHandle(canvas, box, handle, editorId, size, beginResizeDrag
     handleNode.style.cursor = HANDLE_CURSORS[handle];
     handleNode.addEventListener('pointerdown', (event) => beginResizeDrag(event, handleNode));
     return handleNode;
+}
+
+function renderPointEditingOverlay(canvas, overlay, element, editorId, handleSize, beginVertexDrag, insertVertexAtHandle, removeVertexFromHandle) {
+    const localPoints = parsePointList(element);
+    const matrix = element.getCTM();
+    if (!matrix || localPoints.length === 0) {
+        return;
+    }
+
+    const worldPoints = localPoints.map((point) => new DOMPoint(point.x, point.y).matrixTransform(matrix));
+    const edgeSize = Math.max(handleSize * 0.66, 8);
+    const isClosed = element.tagName.toLowerCase() === 'polygon';
+    const edgeCount = isClosed ? worldPoints.length : Math.max(0, worldPoints.length - 1);
+
+    for (let index = 0; index < edgeCount; index += 1) {
+        const nextIndex = (index + 1) % worldPoints.length;
+        const localMidpoint = {
+            x: (localPoints[index].x + localPoints[nextIndex].x) / 2,
+            y: (localPoints[index].y + localPoints[nextIndex].y) / 2
+        };
+        const worldMidpoint = {
+            x: (worldPoints[index].x + worldPoints[nextIndex].x) / 2,
+            y: (worldPoints[index].y + worldPoints[nextIndex].y) / 2
+        };
+        overlay.appendChild(
+            createEdgeInsertHandle(canvas, worldMidpoint, localMidpoint, editorId, index + 1, edgeSize, insertVertexAtHandle)
+        );
+    }
+
+    worldPoints.forEach((point, index) => {
+        overlay.appendChild(
+            createVertexHandle(canvas, point, localPoints[index], editorId, index, handleSize, beginVertexDrag, removeVertexFromHandle)
+        );
+    });
+}
+
+function createVertexHandle(canvas, worldPoint, localPoint, editorId, index, size, beginVertexDrag, removeVertexFromHandle) {
+    const handleNode = document.createElementNS(canvas.namespaceURI, 'circle');
+    handleNode.setAttribute('cx', String(worldPoint.x));
+    handleNode.setAttribute('cy', String(worldPoint.y));
+    handleNode.setAttribute('r', String(size / 2));
+    handleNode.setAttribute('fill', '#fffdf8');
+    handleNode.setAttribute('stroke', '#d9663d');
+    handleNode.setAttribute('stroke-width', '1.5');
+    handleNode.setAttribute('vector-effect', 'non-scaling-stroke');
+    handleNode.setAttribute('pointer-events', 'all');
+    handleNode.setAttribute('data-vertex-editor-id', editorId);
+    handleNode.setAttribute('data-vertex-index', String(index));
+    handleNode.setAttribute('data-vertex-local-x', String(localPoint.x));
+    handleNode.setAttribute('data-vertex-local-y', String(localPoint.y));
+    handleNode.style.cursor = 'move';
+    handleNode.addEventListener('pointerdown', (event) => beginVertexDrag(event, handleNode));
+    handleNode.addEventListener('dblclick', (event) => removeVertexFromHandle(event, handleNode));
+    return handleNode;
+}
+
+function createEdgeInsertHandle(canvas, worldPoint, localPoint, editorId, insertIndex, size, insertVertexAtHandle) {
+    const handleNode = document.createElementNS(canvas.namespaceURI, 'rect');
+    handleNode.setAttribute('x', String(worldPoint.x - (size / 2)));
+    handleNode.setAttribute('y', String(worldPoint.y - (size / 2)));
+    handleNode.setAttribute('width', String(size));
+    handleNode.setAttribute('height', String(size));
+    handleNode.setAttribute('fill', '#5f8ef2');
+    handleNode.setAttribute('stroke', '#fffdf8');
+    handleNode.setAttribute('stroke-width', '1.5');
+    handleNode.setAttribute('vector-effect', 'non-scaling-stroke');
+    handleNode.setAttribute('transform', `rotate(45 ${worldPoint.x} ${worldPoint.y})`);
+    handleNode.setAttribute('pointer-events', 'all');
+    handleNode.setAttribute('data-edge-editor-id', editorId);
+    handleNode.setAttribute('data-edge-insert-index', String(insertIndex));
+    handleNode.setAttribute('data-edge-local-x', String(localPoint.x));
+    handleNode.setAttribute('data-edge-local-y', String(localPoint.y));
+    handleNode.style.cursor = 'copy';
+    handleNode.addEventListener('pointerdown', (event) => insertVertexAtHandle(event, handleNode));
+    return handleNode;
+}
+
+function isPointEditableElement(element) {
+    const tag = element.tagName.toLowerCase();
+    return tag === 'polygon' || tag === 'polyline';
 }
 
 function getHandlePoint(box, handle) {
@@ -484,4 +703,12 @@ function toTransformMatrix(matrix) {
     const values = [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f]
         .map((value) => (Math.abs(value) < 0.0000001 ? 0 : Number(value.toFixed(6))));
     return `matrix(${values.join(' ')})`;
+}
+
+function toLocalPoint(point, inverseMatrix) {
+    if (!inverseMatrix) {
+        return null;
+    }
+
+    return new DOMPoint(point.x, point.y).matrixTransform(inverseMatrix);
 }

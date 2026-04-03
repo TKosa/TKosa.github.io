@@ -72,6 +72,17 @@ export const SHAPE_DEFINITIONS = {
             opacity: 1
         }
     },
+    polygon: {
+        label: 'Polygon',
+        defaults: {
+            elementId: '',
+            points: '180,120 320,160 280,300 140,260',
+            fill: '#5f8ef2',
+            stroke: '#1f1b16',
+            strokeWidth: 2,
+            opacity: 1
+        }
+    },
     text: {
         label: 'Text',
         defaults: {

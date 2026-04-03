@@ -77,6 +77,59 @@ export function setElementTransform(element, transform) {
     element.setAttribute('transform', transform);
 }
 
+export function parsePointList(element) {
+    const points = element.getAttribute('points') ?? '';
+    const values = points
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number)
+        .filter((value) => Number.isFinite(value));
+    const result = [];
+
+    for (let index = 0; index < values.length - 1; index += 2) {
+        result.push({ x: values[index], y: values[index + 1] });
+    }
+
+    return result;
+}
+
+export function serializePointList(points) {
+    return points
+        .map(({ x, y }) => `${Number(x.toFixed(3))},${Number(y.toFixed(3))}`)
+        .join(' ');
+}
+
+export function movePoint(element, index, x, y) {
+    const points = parsePointList(element);
+    if (!points[index]) {
+        return false;
+    }
+
+    points[index] = { x, y };
+    element.setAttribute('points', serializePointList(points));
+    return true;
+}
+
+export function insertPoint(element, index, x, y) {
+    const points = parsePointList(element);
+    const safeIndex = Math.max(0, Math.min(index, points.length));
+    points.splice(safeIndex, 0, { x, y });
+    element.setAttribute('points', serializePointList(points));
+}
+
+export function removePoint(element, index) {
+    const tag = element.tagName.toLowerCase();
+    const points = parsePointList(element);
+    const minimumPoints = tag === 'polygon' ? 3 : 2;
+    if (points.length <= minimumPoints || !points[index]) {
+        return false;
+    }
+
+    points.splice(index, 1);
+    element.setAttribute('points', serializePointList(points));
+    return true;
+}
+
 function bumpAttribute(element, name, delta) {
     const current = Number.parseFloat(element.getAttribute(name) ?? '0');
     element.setAttribute(name, String(current + delta));
