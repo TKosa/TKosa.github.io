@@ -1,28 +1,101 @@
-import { getElementAttributes, getSelectedElementSnapshot } from '../state/document-selectors.js';
+import { findElementByEditorId, getElementAttributes, getSelectedElementSnapshot } from '../state/document-selectors.js';
 
 export function createPropertyPanel({ store, refs }) {
+    let lastSelectedId = null;
+    const draftValues = new Map();
+
+    const getDraftKey = (editorId, attributeName) => `${editorId}:${attributeName}`;
+
+    const updateDraft = (target) => {
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        const editorId = target.dataset.editorId;
+        const { name, value } = target;
+
+        if (!editorId || !name) {
+            return;
+        }
+
+        draftValues.set(getDraftKey(editorId, name), value);
+    };
+
+    const commitField = (target) => {
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+            return;
+        }
+
+        const editorId = target.dataset.editorId;
+        if (!editorId) {
+            return;
+        }
+
+        const attributeName = target.name;
+        draftValues.delete(getDraftKey(editorId, attributeName));
+
+        const element = findElementByEditorId(store.getState().svgRoot, editorId);
+        if (!element) {
+            return;
+        }
+
+        const currentValue = attributeName === 'content'
+            ? (element.textContent ?? '')
+            : (element.getAttribute(attributeName) ?? '');
+
+        if (currentValue === target.value) {
+            return;
+        }
+
+        store.updateElementAttribute(editorId, attributeName, target.value);
+    };
+
     refs.form.addEventListener('input', (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
             return;
         }
 
-        const selected = getSelectedElementSnapshot(store.getState());
-        if (!selected) {
+        updateDraft(target);
+    });
+
+    refs.form.addEventListener('focusout', (event) => {
+        commitField(event.target);
+    });
+
+    refs.form.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== 'color') {
             return;
         }
 
-        const attributeName = target.name;
-        store.updateElementAttribute(
-            selected.getAttribute('data-editor-id'),
-            attributeName,
-            target.value
-        );
+        commitField(target);
+    });
+
+    refs.form.addEventListener('keydown', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) {
+            return;
+        }
+
+        if (event.key !== 'Enter') {
+            return;
+        }
+
+        event.preventDefault();
+        target.blur();
     });
 
     return {
         render(state) {
             const selected = getSelectedElementSnapshot(state);
+            const selectedId = selected?.getAttribute('data-editor-id') ?? null;
+
+            if (selectedId !== lastSelectedId) {
+                draftValues.clear();
+                lastSelectedId = selectedId;
+            }
+
             refs.form.replaceChildren();
 
             if (!selected) {
@@ -36,11 +109,13 @@ export function createPropertyPanel({ store, refs }) {
             grid.className = 'property-grid';
 
             getElementAttributes(selected).forEach(({ name, value }) => {
-                grid.appendChild(createPropertyField(name, value));
+                const draftValue = draftValues.get(getDraftKey(selectedId, name));
+                grid.appendChild(createPropertyField(name, draftValue ?? value, selectedId));
             });
 
             if (selected.tagName.toLowerCase() === 'text') {
-                grid.appendChild(createPropertyField('content', selected.textContent ?? '', true));
+                const draftValue = draftValues.get(getDraftKey(selectedId, 'content'));
+                grid.appendChild(createPropertyField('content', draftValue ?? (selected.textContent ?? ''), selectedId, true));
             }
 
             refs.form.appendChild(grid);
@@ -48,7 +123,7 @@ export function createPropertyPanel({ store, refs }) {
     };
 }
 
-function createPropertyField(name, value, multiline = false) {
+function createPropertyField(name, value, editorId, multiline = false) {
     const row = document.createElement('div');
     row.className = 'property-row';
 
@@ -64,6 +139,7 @@ function createPropertyField(name, value, multiline = false) {
     input.id = `prop-${cssSafeId(name)}`;
     input.name = name;
     input.value = value;
+    input.dataset.editorId = editorId;
 
     row.append(label, input);
     return row;
