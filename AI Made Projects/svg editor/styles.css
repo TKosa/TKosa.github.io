@@ -185,8 +185,8 @@ input[type="color"] {
     position: relative;
     flex: 1;
     min-height: 460px;
-    padding: 28px;
-    overflow: auto;
+    padding: 0;
+    overflow: hidden;
     background:
         linear-gradient(var(--grid-major) 1px, transparent 1px),
         linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
@@ -194,16 +194,23 @@ input[type="color"] {
         linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px),
         linear-gradient(180deg, #f7f1e8 0%, #f0e5d7 100%);
     background-size: 80px 80px, 80px 80px, 20px 20px, 20px 20px, auto;
+    cursor: grab;
 }
 
 #editor-canvas {
-    display: block;
-    margin: 0 auto;
+    position: absolute;
+    top: 0;
+    left: 0;
     background: var(--canvas);
     border: 1px solid rgba(106, 93, 79, 0.3);
     box-shadow: 0 24px 40px rgba(62, 41, 23, 0.14);
     touch-action: none;
     user-select: none;
+    transform-origin: 0 0;
+}
+
+.canvas-stage:active {
+    cursor: grabbing;
 }
 
 .canvas-shape {
