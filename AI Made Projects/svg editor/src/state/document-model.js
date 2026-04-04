@@ -210,9 +210,12 @@ export function createStore() {
             }
 
             const clone = selected.cloneNode(true);
+            const anchor = getElementBottomRight(svgRoot, selected) ?? getElementOrigin(selected);
             refreshElementIds(clone, state.nextElementId);
-            nudgeElement(clone, 24, 24);
             selected.parentNode?.insertBefore(clone, selected.nextSibling);
+            if (anchor && !alignElementTopLeftToAnchor(svgRoot, clone, anchor)) {
+                nudgeElement(clone, 24, 24);
+            }
             commitSvg(svgRoot, clone, { actionName, actionArgs });
             return true;
         },
