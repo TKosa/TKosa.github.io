@@ -47,16 +47,27 @@ export function cloneSvgRoot(svgRoot) {
 
 export function assignEditorIds(svgRoot) {
     let counter = 1;
+    const usedEditorIds = new Set();
 
     walkElements(svgRoot, (element) => {
         if (!(element instanceof Element) || element === svgRoot) {
             return;
         }
 
-        if (!element.hasAttribute('data-editor-id')) {
-            element.setAttribute('data-editor-id', `editor-${counter}`);
+        const currentEditorId = element.getAttribute('data-editor-id');
+        if (currentEditorId && !usedEditorIds.has(currentEditorId)) {
+            usedEditorIds.add(currentEditorId);
+            counter += 1;
+            return;
         }
 
+        while (usedEditorIds.has(`editor-${counter}`)) {
+            counter += 1;
+        }
+
+        const nextEditorId = `editor-${counter}`;
+        element.setAttribute('data-editor-id', nextEditorId);
+        usedEditorIds.add(nextEditorId);
         counter += 1;
     });
 }
