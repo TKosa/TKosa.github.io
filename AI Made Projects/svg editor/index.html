@@ -69,8 +69,10 @@
                 <section class="panel">
                     <div class="panel-heading">
                         <h2>SVG Source</h2>
+                        <button type="button" class="panel-action" id="source-mode-toggle">Edit Source</button>
                     </div>
-                    <textarea id="source-input" spellcheck="false"></textarea>
+                    <div id="source-viewer" class="source-surface source-viewer" aria-live="polite"></div>
+                    <textarea id="source-input" class="source-surface" spellcheck="false" hidden></textarea>
                 </section>
 
                 <section class="panel">

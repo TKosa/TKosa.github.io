@@ -1,58 +1,99 @@
 import { getSelectedElementSnapshot } from '../state/document-selectors.js';
-import { clearSourceSelection, captureSelectionScroll, getChangedFields, highlightChangedFields, revealElementBlock, summarizeElement } from './source-selection.js';
-import { syncSourceValue } from './source-sync.js';
+import { clearSourceSelection, getChangedFields, highlightChangedFields, renderSourceViewer, revealElementBlock, summarizeElement } from './source-selection.js';
 
-const SOURCE_DEBOUNCE_MS = 350;
+const SOURCE_UPDATE_DEBOUNCE_MS = 350;
 const SELECTION_REVEAL_MS = 250;
-export function createSourceController({ store, refs, commands, status }) {
+
+export function createSourceController({ store, refs, commands }) {
     let pushTimer = null;
-    let pullTimer = null;
     let revealTimer = null;
-    let sourceDirty = false;
+    let isEditingSource = false;
     let lastSelectedId = null;
     let lastSelectedSummary = null;
+    let lastRenderedSource = '';
 
-    refs.sourceInput.addEventListener('input', () => {
-        sourceDirty = true;
-        clearTimeout(pullTimer);
-        pullTimer = window.setTimeout(() => {
-            try {
-                commands.updateSourceDocument(refs.sourceInput.value);
-                sourceDirty = false;
-            } catch (error) {
-                void error;
-            }
-        }, SOURCE_DEBOUNCE_MS);
+    const renderPlainSource = (source) => {
+        renderSourceViewer(refs.sourceViewer, source);
+        lastRenderedSource = source;
+    };
+
+    const clearCanvasSelection = () => {
+        if (store.getState().selectedId !== null) {
+            store.selectElement(null);
+        }
+    };
+
+    const syncModeUi = () => {
+        refs.sourceViewer.hidden = isEditingSource;
+        refs.sourceInput.hidden = !isEditingSource;
+        refs.sourceModeToggle.textContent = isEditingSource ? 'Apply Source' : 'Edit Source';
+    };
+
+    const enterEditMode = () => {
+        clearTimeout(pushTimer);
+        clearTimeout(revealTimer);
+        isEditingSource = true;
+        refs.sourceInput.value = store.serialize();
+        syncModeUi();
+        refs.sourceInput.focus({ preventScroll: true });
+    };
+
+    const exitEditMode = () => {
+        isEditingSource = false;
+        syncModeUi();
+
+        try {
+            commands.updateSourceDocument(refs.sourceInput.value);
+        } catch (error) {
+            isEditingSource = true;
+            syncModeUi();
+            window.alert(error instanceof Error ? error.message : 'Unable to apply SVG source.');
+            refs.sourceInput.focus({ preventScroll: true });
+        }
+    };
+
+    refs.sourceModeToggle.addEventListener('click', () => {
+        if (isEditingSource) {
+            exitEditMode();
+            return;
+        }
+
+        enterEditMode();
     });
 
-    refs.sourceInput.addEventListener('select', () => {
-        captureSelectionScroll(refs.sourceInput);
-        status?.syncSelectionSummary?.();
-    });
+    refs.sourceViewer.addEventListener('pointerdown', clearCanvasSelection);
+    refs.sourceInput.addEventListener('pointerdown', clearCanvasSelection);
+    refs.sourceInput.addEventListener('focus', clearCanvasSelection);
+    refs.sourceInput.addEventListener('select', clearCanvasSelection);
+
+    syncModeUi();
 
     return {
         render(state) {
-            if (sourceDirty) {
+            if (isEditingSource) {
                 return;
             }
 
             const nextSource = store.serialize();
+            const sourceChanged = nextSource !== lastRenderedSource;
             const selected = getSelectedElementSnapshot(state);
             const currentSummary = summarizeElement(selected);
             const selectionChanged = state.selectedId !== lastSelectedId;
+
             if (selectionChanged) {
                 clearTimeout(pushTimer);
-                syncSourceValue(refs.sourceInput, nextSource);
+                renderPlainSource(nextSource);
                 clearTimeout(revealTimer);
                 if (selected) {
                     revealTimer = window.setTimeout(() => {
-                        if (!revealElementBlock(refs.sourceInput, selected)) {
-                            clearSourceSelection(refs.sourceInput);
+                        if (!revealElementBlock(refs.sourceViewer, nextSource, selected)) {
+                            clearSourceSelection(refs.sourceViewer, nextSource);
                         }
                     }, SELECTION_REVEAL_MS);
                 } else {
-                    clearSourceSelection(refs.sourceInput);
+                    clearSourceSelection(refs.sourceViewer, nextSource);
                 }
+
                 lastSelectedId = state.selectedId;
                 lastSelectedSummary = currentSummary;
                 return;
@@ -60,24 +101,24 @@ export function createSourceController({ store, refs, commands, status }) {
 
             clearTimeout(pushTimer);
             pushTimer = window.setTimeout(() => {
-                const didUpdateSource = syncSourceValue(refs.sourceInput, nextSource);
-
                 if (selected) {
                     const changedFields = getChangedFields(lastSelectedSummary, currentSummary, true);
-                    if (didUpdateSource && changedFields.length > 0) {
-                        if (!highlightChangedFields(refs.sourceInput, selected, changedFields)) {
-                            clearSourceSelection(refs.sourceInput);
+                    if (sourceChanged && changedFields.length > 0) {
+                        if (!highlightChangedFields(refs.sourceViewer, nextSource, selected, changedFields)) {
+                            renderPlainSource(nextSource);
+                        } else {
+                            lastRenderedSource = nextSource;
                         }
                     } else {
-                        clearSourceSelection(refs.sourceInput);
+                        renderPlainSource(nextSource);
                     }
                 } else {
-                    clearSourceSelection(refs.sourceInput);
+                    renderPlainSource(nextSource);
                 }
 
                 lastSelectedId = state.selectedId;
                 lastSelectedSummary = currentSummary;
-            }, SOURCE_DEBOUNCE_MS);
+            }, SOURCE_UPDATE_DEBOUNCE_MS);
         }
     };
 }

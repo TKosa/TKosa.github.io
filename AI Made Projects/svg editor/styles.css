@@ -237,7 +237,7 @@ input[type="color"] {
     font-size: 14px;
 }
 
-#source-input {
+.source-surface {
     min-height: 320px;
     resize: vertical;
     font-family: "IBM Plex Mono", monospace;
@@ -245,12 +245,34 @@ input[type="color"] {
     line-height: 1.5;
 }
 
-#source-input.is-change-highlight::selection {
-    background: rgba(255, 213, 74, 0.85);
-    color: #1f1b16;
+.source-viewer {
+    overflow-x: hidden;
+    overflow-y: scroll;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.8);
+    color: var(--ink);
 }
 
-#source-input.is-change-highlight::-moz-selection {
+.source-viewer[hidden],
+#source-input[hidden] {
+    display: none;
+}
+
+.source-range {
+    border-radius: 6px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+
+.source-range-selected {
+    background: rgba(45, 127, 249, 0.16);
+}
+
+.source-range-highlight {
     background: rgba(255, 213, 74, 0.85);
     color: #1f1b16;
 }

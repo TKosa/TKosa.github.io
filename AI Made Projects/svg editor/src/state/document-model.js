@@ -29,6 +29,7 @@ export function createStore() {
     let state = createInitialState();
     const listeners = new Set();
     let clipboardSnapshot = null;
+    let lastPointerPosition = null;
     const history = {
         present: createHistoryEntry(state),
         undoStack: [],
@@ -77,6 +78,13 @@ export function createStore() {
             svgRoot: cloneSvgRoot(snapshotState.svgRoot),
             selectedId: snapshotState.selectedId
         };
+    }
+
+    function recordAction(actionName, actionArgs = []) {
+        setState({
+            ...state,
+            lastAction: createAction(actionName, actionArgs)
+        });
     }
 
     function clearHistoryTimer() {
@@ -161,6 +169,17 @@ export function createStore() {
             listener(state);
             return () => listeners.delete(listener);
         },
+        setLastPointerPosition(point) {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+                lastPointerPosition = null;
+                return;
+            }
+
+            lastPointerPosition = {
+                x: point.x,
+                y: point.y
+            };
+        },
         selectElement(editorId) {
             setState({
                 ...state,
@@ -219,7 +238,7 @@ export function createStore() {
             commitSvg(svgRoot, clone, { actionName, actionArgs });
             return true;
         },
-        copySelectedElement() {
+        copySelectedElement(actionName, actionArgs) {
             if (!state.selectedId) {
                 clipboardSnapshot = null;
                 return false;
@@ -233,8 +252,10 @@ export function createStore() {
 
             clipboardSnapshot = {
                 element: sanitizeClipboardElement(selected.cloneNode(true)),
-                anchor: getClipboardAnchor(state.svgRoot, state.selectedId)
+                anchor: getClipboardAnchor(state.svgRoot, state.selectedId),
+                pointerPositionAtCopy: clonePoint(lastPointerPosition)
             };
+            recordAction(actionName, actionArgs);
             return true;
         },
         pasteClipboardElement(actionName, actionArgs) {
@@ -248,13 +269,20 @@ export function createStore() {
 
             const target = findElementByEditorId(svgRoot, state.selectedId);
             insertClipboardClone(svgRoot, target, clone);
-            if (clipboardSnapshot.anchor && !alignElementTopLeftToAnchor(svgRoot, clone, clipboardSnapshot.anchor)) {
+            const shouldUsePointerPosition = shouldPasteAtPointer(lastPointerPosition, clipboardSnapshot.pointerPositionAtCopy);
+            const didAlign = shouldUsePointerPosition
+                ? alignElementCenterToAnchor(svgRoot, clone, lastPointerPosition)
+                : clipboardSnapshot.anchor
+                    ? alignElementTopLeftToAnchor(svgRoot, clone, clipboardSnapshot.anchor)
+                    : false;
+            if (!didAlign) {
                 nudgeElement(clone, 24, 24);
             }
 
             clipboardSnapshot = {
                 element: sanitizeClipboardElement(clone.cloneNode(true)),
-                anchor: getElementBottomRight(svgRoot, clone) ?? clipboardSnapshot.anchor
+                anchor: getElementBottomRight(svgRoot, clone) ?? clipboardSnapshot.anchor,
+                pointerPositionAtCopy: clonePoint(lastPointerPosition)
             };
             commitSvg(svgRoot, clone, { actionName, actionArgs });
             return true;
@@ -406,6 +434,19 @@ function alignElementTopLeftToAnchor(svgRoot, element, anchor) {
     return true;
 }
 
+function alignElementCenterToAnchor(svgRoot, element, anchor) {
+    const box = measureElementBox(svgRoot, element);
+    if (!box || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
+        return false;
+    }
+
+    const centerX = box.x + (box.width / 2);
+    const centerY = box.y + (box.height / 2);
+    const localDelta = toParentLocalDelta(element, anchor.x - centerX, anchor.y - centerY);
+    translateElement(element, localDelta.x, localDelta.y);
+    return true;
+}
+
 function getElementBottomRight(svgRoot, element) {
     const box = measureElementBox(svgRoot, element);
     if (!box) {
@@ -498,6 +539,28 @@ function getElementOrigin(element) {
     }
 
     return null;
+}
+
+function clonePoint(point) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return null;
+    }
+
+    return {
+        x: point.x,
+        y: point.y
+    };
+}
+
+function shouldPasteAtPointer(lastPoint, pointerPositionAtCopy) {
+    return Boolean(
+        lastPoint
+        && Number.isFinite(lastPoint.x)
+        && Number.isFinite(lastPoint.y)
+        && (!pointerPositionAtCopy
+            || lastPoint.x !== pointerPositionAtCopy.x
+            || lastPoint.y !== pointerPositionAtCopy.y)
+    );
 }
 
 function toParentLocalDelta(element, deltaX, deltaY) {

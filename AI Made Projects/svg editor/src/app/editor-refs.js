@@ -11,6 +11,8 @@ const REF_SELECTORS = {
     emptyState: 'empty-state',
     summary: 'selection-summary',
     sourceInput: 'source-input',
+    sourceViewer: 'source-viewer',
+    sourceModeToggle: 'source-mode-toggle',
     canvasWidth: 'canvas-width',
     canvasHeight: 'canvas-height'
 };

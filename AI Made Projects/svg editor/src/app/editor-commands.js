@@ -1,6 +1,12 @@
 import { downloadTextFile } from '../core/utils.js';
+import { getSelectedElementSnapshot } from '../state/document-selectors.js';
 
 export function createEditorCommands({ store, status }) {
+    const getSelectedElementName = () => {
+        const selected = getSelectedElementSnapshot(store.getState());
+        return selected ? selected.tagName.toLowerCase() : null;
+    };
+
     return {
         addShape(type) {
             store.addElement('add-shape', [type], type);
@@ -34,7 +40,8 @@ export function createEditorCommands({ store, status }) {
             }
         },
         copySelection() {
-            if (store.copySelectedElement()) {
+            const elementName = getSelectedElementName();
+            if (store.copySelectedElement('copy-selection', [elementName])) {
                 status.setMessage('Element copied');
                 return true;
             }

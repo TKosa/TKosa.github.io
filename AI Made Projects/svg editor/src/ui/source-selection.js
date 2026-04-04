@@ -1,5 +1,4 @@
 import { getElementSourceMarker } from '../svg/serializer.js';
-import { getScrollTopForSelectionEnd } from './source-textarea-measure.js';
 
 const REVEAL_TOP_PADDING_PX = 100;
 
@@ -42,18 +41,35 @@ export function getChangedFields(previous, current, sameSelection) {
     return changed;
 }
 
-export function revealElementBlock(textarea, element) {
-    const markerRange = getElementMarkerRange(textarea.value, element);
+export function renderSourceViewer(viewer, source, focusRange = null, mode = 'plain') {
+    const range = normalizeRange(source, focusRange);
+    if (!range) {
+        viewer.innerHTML = escapeHtml(source);
+        return;
+    }
+
+    const before = escapeHtml(source.slice(0, range.start));
+    const content = escapeHtml(source.slice(range.start, range.end));
+    const after = escapeHtml(source.slice(range.end));
+    const focusClass = mode === 'highlight'
+        ? 'source-range source-range-highlight'
+        : 'source-range source-range-selected';
+    viewer.innerHTML = `${before}<span class="${focusClass}" data-source-focus="true">${content}</span>${after}`;
+    scrollToFocusedRange(viewer);
+}
+
+export function revealElementBlock(viewer, source, element) {
+    const markerRange = getElementMarkerRange(source, element);
     if (!markerRange) {
         return false;
     }
 
-    revealTextareaRange(textarea, markerRange.start, markerRange.end, false);
+    renderSourceViewer(viewer, source, markerRange, 'selection');
     return true;
 }
 
-export function highlightChangedFields(textarea, element, changedFields) {
-    const markerRange = getElementMarkerRange(textarea.value, element);
+export function highlightChangedFields(viewer, source, element, changedFields) {
+    const markerRange = getElementMarkerRange(source, element);
     if (!markerRange) {
         return false;
     }
@@ -63,21 +79,29 @@ export function highlightChangedFields(textarea, element, changedFields) {
         return false;
     }
 
-    const selectionStart = markerRange.start + changedRange.start;
-    const selectionEnd = selectionStart + changedRange.length;
-    revealTextareaRange(textarea, selectionStart, selectionEnd, true);
+    renderSourceViewer(viewer, source, {
+        start: markerRange.start + changedRange.start,
+        end: markerRange.start + changedRange.start + changedRange.length
+    }, 'highlight');
     return true;
 }
 
-export function clearSourceSelection(textarea) {
-    textarea.classList.remove('is-change-highlight');
-    textarea.setSelectionRange(0, 0);
+export function clearSourceSelection(viewer, source) {
+    renderSourceViewer(viewer, source);
 }
 
-export function captureSelectionScroll(textarea) {
-    textarea.dataset.lastSelectedSourceY = String(
-        Math.round(getScrollTopForSelectionEnd(textarea, textarea.selectionEnd))
-    );
+function normalizeRange(source, range) {
+    if (!range) {
+        return null;
+    }
+
+    const start = Math.max(0, Math.min(source.length, range.start));
+    const end = Math.max(start, Math.min(source.length, range.end));
+    if (end <= start) {
+        return null;
+    }
+
+    return { start, end };
 }
 
 function getElementMarkerRange(source, element) {
@@ -125,17 +149,6 @@ function getElementMarkerRange(source, element) {
     };
 }
 
-function revealTextareaRange(textarea, start, end, highlight) {
-    requestAnimationFrame(() => {
-        textarea.classList.toggle('is-change-highlight', highlight);
-        textarea.focus({ preventScroll: true });
-        textarea.setSelectionRange(start, end);
-        const targetScrollTop = getScrollTopForSelectionEnd(textarea, end);
-        const maxScrollTop = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
-        textarea.scrollTop = Math.min(maxScrollTop, Math.max(0, targetScrollTop - REVEAL_TOP_PADDING_PX));
-    });
-}
-
 function findChangedRangeWithinMarker(marker, changedFields) {
     let start = Number.POSITIVE_INFINITY;
     let end = -1;
@@ -170,4 +183,24 @@ function findChangedRangeWithinMarker(marker, changedFields) {
         start,
         length: end - start
     };
+}
+
+function scrollToFocusedRange(viewer) {
+    requestAnimationFrame(() => {
+        const focused = viewer.querySelector('[data-source-focus="true"]');
+        if (!(focused instanceof HTMLElement)) {
+            return;
+        }
+
+        const nextScrollTop = Math.max(0, focused.offsetTop - REVEAL_TOP_PADDING_PX);
+        viewer.scrollTop = nextScrollTop;
+    });
+}
+
+function escapeHtml(value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
 }

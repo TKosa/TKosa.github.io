@@ -144,6 +144,7 @@ export function createCanvasController({ store, refs, status }) {
 
     const updateHoverCoordinates = (event) => {
         const point = getSvgPoint(event, refs.canvas);
+        store.setLastPointerPosition?.(point);
         status?.showCanvasCoordinates?.(point);
     };
 
@@ -243,6 +244,12 @@ export function createCanvasController({ store, refs, status }) {
             return;
         }
 
+        if (document.activeElement === refs.sourceInput) {
+            refs.sourceInput.blur();
+        }
+
+        const point = getSvgPoint(event, refs.canvas);
+        store.setLastPointerPosition?.(point);
         const target = event.target instanceof SVGElement ? event.target.closest('[data-editor-id]') : null;
         if (!target || !isInteractableElement(target)) {
             store.selectElement(null);
@@ -259,7 +266,6 @@ export function createCanvasController({ store, refs, status }) {
         }
 
         const editorId = target.getAttribute('data-editor-id');
-        const point = getSvgPoint(event, refs.canvas);
         const transformDrag = target.hasAttribute('transform')
             ? createTransformDragState(target, point)
             : null;
