@@ -1,4 +1,4 @@
-import { INTERACTABLE_TAGS, walkElements } from './document-dom.js';
+import { isSelectableElement, walkElements } from './document-dom.js';
 
 export function refreshElementIds(root, startingId) {
     let nextId = startingId;
@@ -9,7 +9,7 @@ export function refreshElementIds(root, startingId) {
         }
 
         element.removeAttribute('data-editor-id');
-        if (INTERACTABLE_TAGS.has(element.tagName.toLowerCase())) {
+        if (isSelectableElement(element, root instanceof SVGSVGElement ? root : null)) {
             element.setAttribute('id', String(nextId));
             nextId += 1;
         }

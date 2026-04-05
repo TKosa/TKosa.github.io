@@ -1,6 +1,24 @@
 import { DEFAULT_DOCUMENT, SHAPE_DEFINITIONS, SVG_NS } from '../core/constants.js';
 
-export const INTERACTABLE_TAGS = new Set(['g', 'rect', 'circle', 'ellipse', 'line', 'text', 'path', 'polygon', 'polyline']);
+const NON_SELECTABLE_TAGS = new Set([
+    'defs',
+    'symbol',
+    'marker',
+    'clipPath',
+    'mask',
+    'pattern',
+    'linearGradient',
+    'radialGradient',
+    'filter',
+    'stop',
+    'style',
+    'script',
+    'title',
+    'desc',
+    'metadata'
+]);
+
+const DIRECT_SELECTABLE_TAGS = new Set(['g', 'use', 'image', 'foreignObject']);
 
 const NUMERIC_ID_PATTERN = /^\d+$/;
 
@@ -123,13 +141,62 @@ export function getCanvasMetrics(svgRoot) {
     return { width, height };
 }
 
-export function isInteractableElement(element) {
-    return Boolean(element && INTERACTABLE_TAGS.has(element.tagName.toLowerCase()));
+export function isSelectableElement(element, svgRoot = null) {
+    if (!(element instanceof SVGElement)) {
+        return false;
+    }
+
+    if (element instanceof SVGSVGElement) {
+        return false;
+    }
+
+    if (isInNonSelectableSubtree(element, svgRoot)) {
+        return false;
+    }
+
+    const tagName = element.localName;
+    if (NON_SELECTABLE_TAGS.has(tagName)) {
+        return false;
+    }
+
+    return DIRECT_SELECTABLE_TAGS.has(tagName)
+        || element instanceof SVGGraphicsElement;
 }
 
 export function getFirstSelectableEditorId(svgRoot) {
-    const first = svgRoot.querySelector(Array.from(INTERACTABLE_TAGS).join(','));
-    return first?.getAttribute('data-editor-id') ?? null;
+    let firstSelectableId = null;
+
+    walkElements(svgRoot, (element) => {
+        if (firstSelectableId || !isSelectableElement(element, svgRoot)) {
+            return;
+        }
+
+        firstSelectableId = element.getAttribute('data-editor-id');
+    });
+
+    return firstSelectableId ?? null;
+}
+
+export function resolveSelectableElement(target, svgRoot) {
+    if (!(target instanceof SVGElement)) {
+        return null;
+    }
+
+    let current = target;
+    while (current && current !== svgRoot) {
+        if (isSelectableElement(current, svgRoot)) {
+            if (current.localName === 'use') {
+                const parentSelection = findSelectableAncestor(current.parentElement, svgRoot);
+                return parentSelection ?? current;
+            }
+
+            return current;
+        }
+
+        current = current.parentElement;
+    }
+
+    return null;
 }
 
 export function toSvgAttributeName(property) {
@@ -139,4 +206,30 @@ export function toSvgAttributeName(property) {
 function parseSize(value) {
     const parsed = Number.parseFloat(value ?? '');
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isInNonSelectableSubtree(element, svgRoot) {
+    let current = element.parentElement;
+    while (current && current !== svgRoot) {
+        if (NON_SELECTABLE_TAGS.has(current.localName)) {
+            return true;
+        }
+
+        current = current.parentElement;
+    }
+
+    return false;
+}
+
+function findSelectableAncestor(element, svgRoot) {
+    let current = element;
+    while (current && current !== svgRoot) {
+        if (isSelectableElement(current, svgRoot)) {
+            return current;
+        }
+
+        current = current.parentElement;
+    }
+
+    return null;
 }

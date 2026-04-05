@@ -1,5 +1,5 @@
 import { toNumber } from '../core/utils.js';
-import { findElementByEditorId, getCanvasMetrics, isInteractableElement } from '../state/document-selectors.js';
+import { findElementByEditorId, getCanvasMetrics, resolveSelectableElement } from '../state/document-selectors.js';
 import { parsePointList } from '../svg/element-operations.js';
 
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -250,8 +250,10 @@ export function createCanvasController({ store, refs, status }) {
 
         const point = getSvgPoint(event, refs.canvas);
         store.setLastPointerPosition?.(point);
-        const target = event.target instanceof SVGElement ? event.target.closest('[data-editor-id]') : null;
-        if (!target || !isInteractableElement(target)) {
+        const target = event.target instanceof SVGElement
+            ? resolveSelectableElement(event.target, refs.canvas)
+            : null;
+        if (!target) {
             store.selectElement(null);
             dragState = {
                 mode: 'pan',
