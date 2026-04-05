@@ -20,6 +20,7 @@ export function createCanvasController({ store, refs, status }) {
     let panX = 0;
     let panY = 0;
     let viewportInitialized = false;
+    let marqueeOverlay = null;
 
     const getElementLabel = (element) => element.tagName.toLowerCase();
 
@@ -47,6 +48,54 @@ export function createCanvasController({ store, refs, status }) {
             store.updateElementAttribute(actionName, actionArgs, editorId, 'transform', transform ?? '');
         }
     };
+
+    const clearMarqueeOverlay = () => {
+        marqueeOverlay?.remove();
+        marqueeOverlay = null;
+    };
+
+    const setStageMode = (mode = '') => {
+        if (mode) {
+            refs.canvasStage.dataset.mode = mode;
+            return;
+        }
+
+        delete refs.canvasStage.dataset.mode;
+    };
+
+    const renderMarqueeOverlay = (bounds) => {
+        if (!bounds) {
+            clearMarqueeOverlay();
+            return;
+        }
+
+        if (!marqueeOverlay) {
+            marqueeOverlay = document.createElement('div');
+            marqueeOverlay.classList.add('marquee-selection-outline');
+            refs.canvasStage.appendChild(marqueeOverlay);
+        }
+
+        marqueeOverlay.style.left = `${panX + (bounds.x * zoom)}px`;
+        marqueeOverlay.style.top = `${panY + (bounds.y * zoom)}px`;
+        marqueeOverlay.style.width = `${bounds.width * zoom}px`;
+        marqueeOverlay.style.height = `${bounds.height * zoom}px`;
+    };
+
+    const getMarqueeBounds = (startPoint, endPoint) => ({
+        x: Math.min(startPoint.x, endPoint.x),
+        y: Math.min(startPoint.y, endPoint.y),
+        width: Math.abs(endPoint.x - startPoint.x),
+        height: Math.abs(endPoint.y - startPoint.y)
+    });
+
+    const getElementsInMarquee = (bounds) => Array.from(refs.canvas.querySelectorAll('[data-editor-id]'))
+        .filter((element) => element instanceof SVGGraphicsElement)
+        .filter((element) => {
+            const box = getTransformedBox(element);
+            return boxesIntersect(bounds, box);
+        })
+        .map((element) => element.getAttribute('data-editor-id'))
+        .filter(Boolean);
 
     const beginVertexDrag = (event, handleNode) => {
         if (!(handleNode instanceof SVGElement)) {
@@ -174,6 +223,14 @@ export function createCanvasController({ store, refs, status }) {
 
         event.preventDefault();
 
+        if (dragState.mode === 'marquee-select') {
+            const point = getSvgPoint(event, refs.canvas);
+            const bounds = getMarqueeBounds(dragState.startPoint, point);
+            dragState.currentPoint = point;
+            renderMarqueeOverlay(bounds);
+            return;
+        }
+
         if (dragState.mode === 'resize-element') {
             const point = getSvgPoint(event, refs.canvas);
             const transform = getResizeTransform(dragState, point);
@@ -276,15 +333,27 @@ export function createCanvasController({ store, refs, status }) {
             : null;
         const isModifierSelection = event.ctrlKey || event.metaKey;
         if (!target) {
-            applySelection([]);
-            dragState = {
-                mode: 'pan',
-                pointerId: event.pointerId,
-                startClientX: event.clientX,
-                startClientY: event.clientY,
-                startPanX: panX,
-                startPanY: panY
-            };
+            if (isModifierSelection) {
+                dragState = {
+                    mode: 'marquee-select',
+                    pointerId: event.pointerId,
+                    startPoint: point,
+                    currentPoint: point,
+                    initialSelection: getSelectedIds(store.getState())
+                };
+                setStageMode('marquee');
+                renderMarqueeOverlay(getMarqueeBounds(point, point));
+            } else {
+                applySelection([]);
+                dragState = {
+                    mode: 'pan',
+                    pointerId: event.pointerId,
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    startPanX: panX,
+                    startPanY: panY
+                };
+            }
             refs.canvasStage.setPointerCapture(event.pointerId);
             return;
         }
@@ -333,6 +402,19 @@ export function createCanvasController({ store, refs, status }) {
             refs.canvasStage.releasePointerCapture(event.pointerId);
         }
 
+        if (dragState.mode === 'marquee-select') {
+            const bounds = getMarqueeBounds(dragState.startPoint, dragState.currentPoint ?? dragState.startPoint);
+            applySelection([
+                ...dragState.initialSelection,
+                ...getElementsInMarquee(bounds)
+            ]);
+            clearMarqueeOverlay();
+            setStageMode();
+            if (refs.canvasStage.hasPointerCapture(event.pointerId)) {
+                refs.canvasStage.releasePointerCapture(event.pointerId);
+            }
+        }
+
         if ((dragState.mode === 'move-element' || dragState.mode === 'move-selection') && refs.canvas.hasPointerCapture(event.pointerId)) {
             refs.canvas.releasePointerCapture(event.pointerId);
         }
@@ -346,6 +428,7 @@ export function createCanvasController({ store, refs, status }) {
         }
 
         refs.canvasStage.style.cursor = '';
+        setStageMode();
         dragState = null;
     };
 
@@ -830,4 +913,19 @@ function toLocalPoint(point, inverseMatrix) {
     }
 
     return localPoint;
+}
+
+function boxesIntersect(left, right) {
+    return Number.isFinite(left?.x)
+        && Number.isFinite(left?.y)
+        && Number.isFinite(left?.width)
+        && Number.isFinite(left?.height)
+        && Number.isFinite(right?.x)
+        && Number.isFinite(right?.y)
+        && Number.isFinite(right?.width)
+        && Number.isFinite(right?.height)
+        && left.x <= right.x + right.width
+        && left.x + left.width >= right.x
+        && left.y <= right.y + right.height
+        && left.y + left.height >= right.y;
 }
