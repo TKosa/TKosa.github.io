@@ -1,5 +1,5 @@
 import { toNumber } from '../core/utils.js';
-import { findElementByEditorId, getCanvasMetrics, resolveSelectableElement } from '../state/document-selectors.js';
+import { findElementByEditorId, getCanvasMetrics, getSelectedIds, resolveSelectableElement } from '../state/document-selectors.js';
 import { parsePointList } from '../svg/element-operations.js';
 
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -27,6 +27,15 @@ export function createCanvasController({ store, refs, status }) {
         elementName,
         ...values.map((value) => Math.round(value))
     ];
+
+    const applySelection = (editorIds) => {
+        if (typeof store.setSelection === 'function') {
+            store.setSelection(editorIds);
+            return;
+        }
+
+        store.selectElement?.(editorIds.at(-1) ?? null);
+    };
 
     const applyElementTransform = (actionName, actionArgs, editorId, transform) => {
         if (typeof store.setElementTransform === 'function') {
@@ -214,6 +223,18 @@ export function createCanvasController({ store, refs, status }) {
             return;
         }
 
+        if (dragState.mode === 'move-selection') {
+            store.moveSelectedElements(
+                'drag',
+                formatPointArgs(`${dragState.editorIds.length}-elements`, point.x, point.y),
+                dragState.editorIds,
+                deltaX,
+                deltaY
+            );
+            dragState.previous = point;
+            return;
+        }
+
         store.moveElement('drag', formatPointArgs(dragState.elementName, point.x, point.y), dragState.editorId, deltaX, deltaY);
         dragState.previous = point;
     };
@@ -253,8 +274,9 @@ export function createCanvasController({ store, refs, status }) {
         const target = event.target instanceof SVGElement
             ? resolveSelectableElement(event.target, refs.canvas)
             : null;
+        const isModifierSelection = event.ctrlKey || event.metaKey;
         if (!target) {
-            store.selectElement(null);
+            applySelection([]);
             dragState = {
                 mode: 'pan',
                 pointerId: event.pointerId,
@@ -268,17 +290,32 @@ export function createCanvasController({ store, refs, status }) {
         }
 
         const editorId = target.getAttribute('data-editor-id');
+        const selectedIds = getSelectedIds(store.getState());
+        const targetAlreadySelected = editorId ? selectedIds.includes(editorId) : false;
+
+        if (isModifierSelection && editorId) {
+            store.selectElement(editorId, { additive: true, toggle: true });
+            dragState = null;
+            return;
+        }
+
         const transformDrag = target.hasAttribute('transform')
             ? createTransformDragState(target, point)
             : null;
-        store.selectElement(editorId);
+        const dragSelectionIds = targetAlreadySelected && selectedIds.length > 1
+            ? selectedIds
+            : editorId
+                ? [editorId]
+                : [];
+        applySelection(dragSelectionIds);
         dragState = {
-            mode: 'move-element',
+            mode: dragSelectionIds.length > 1 ? 'move-selection' : 'move-element',
             editorId,
+            editorIds: dragSelectionIds,
             elementName: getElementLabel(target),
             pointerId: event.pointerId,
             previous: point,
-            transformDrag
+            transformDrag: dragSelectionIds.length === 1 ? transformDrag : null
         };
         refs.canvas.setPointerCapture(event.pointerId);
     });
@@ -296,7 +333,7 @@ export function createCanvasController({ store, refs, status }) {
             refs.canvasStage.releasePointerCapture(event.pointerId);
         }
 
-        if (dragState.mode === 'move-element' && refs.canvas.hasPointerCapture(event.pointerId)) {
+        if ((dragState.mode === 'move-element' || dragState.mode === 'move-selection') && refs.canvas.hasPointerCapture(event.pointerId)) {
             refs.canvas.releasePointerCapture(event.pointerId);
         }
 
@@ -338,10 +375,22 @@ export function createCanvasController({ store, refs, status }) {
 
 function renderSvg(canvas, state, zoom, overlayHandlers) {
     syncSvgRoot(canvas, state.svgRoot);
-    const selected = findElementByEditorId(canvas, state.selectedId);
-    if (selected) {
-        renderSelectionOverlay(canvas, selected, state.selectedId, zoom, overlayHandlers);
+    const selectedIds = getSelectedIds(state);
+    const selectedElements = selectedIds
+        .map((editorId) => findElementByEditorId(canvas, editorId))
+        .filter(Boolean);
+    if (selectedElements.length === 0) {
+        return;
     }
+
+    if (selectedElements.length === 1) {
+        renderSelectionOverlay(canvas, selectedElements[0], selectedIds[0], zoom, overlayHandlers);
+        return;
+    }
+
+    selectedElements.forEach((selected) => {
+        renderSelectionOutline(canvas, selected);
+    });
 }
 
 function syncSvgRoot(target, source) {
@@ -394,18 +443,7 @@ function renderSelectionOverlay(canvas, selected, editorId, zoom, overlayHandler
         overlay.classList.add('selection-overlay');
         overlay.setAttribute('pointer-events', 'none');
 
-        const outline = document.createElementNS(canvas.namespaceURI, 'rect');
-        outline.setAttribute('x', String(box.x));
-        outline.setAttribute('y', String(box.y));
-        outline.setAttribute('width', String(box.width));
-        outline.setAttribute('height', String(box.height));
-        outline.setAttribute('fill', 'none');
-        outline.setAttribute('stroke', '#2d7ff9');
-        outline.setAttribute('stroke-width', '1.5');
-        outline.setAttribute('stroke-dasharray', '5 4');
-        outline.setAttribute('vector-effect', 'non-scaling-stroke');
-        outline.setAttribute('pointer-events', 'none');
-        outline.classList.add('selection-outline');
+        const outline = createSelectionOutlineNode(canvas, box);
         overlay.appendChild(outline);
 
         const handleSize = 12 / Math.max(zoom, 0.001);
@@ -434,6 +472,39 @@ function renderSelectionOverlay(canvas, selected, editorId, zoom, overlayHandler
     } catch (error) {
         void error;
     }
+}
+
+function renderSelectionOutline(canvas, selected) {
+    try {
+        const box = getTransformedBox(selected);
+        if (!Number.isFinite(box.x) || !Number.isFinite(box.y) || box.width < 0 || box.height < 0) {
+            return;
+        }
+
+        const overlay = document.createElementNS(canvas.namespaceURI, 'g');
+        overlay.classList.add('selection-overlay');
+        overlay.setAttribute('pointer-events', 'none');
+        overlay.appendChild(createSelectionOutlineNode(canvas, box));
+        canvas.appendChild(overlay);
+    } catch (error) {
+        void error;
+    }
+}
+
+function createSelectionOutlineNode(canvas, box) {
+    const outline = document.createElementNS(canvas.namespaceURI, 'rect');
+    outline.setAttribute('x', String(box.x));
+    outline.setAttribute('y', String(box.y));
+    outline.setAttribute('width', String(box.width));
+    outline.setAttribute('height', String(box.height));
+    outline.setAttribute('fill', 'none');
+    outline.setAttribute('stroke', '#2d7ff9');
+    outline.setAttribute('stroke-width', '1.5');
+    outline.setAttribute('stroke-dasharray', '5 4');
+    outline.setAttribute('vector-effect', 'non-scaling-stroke');
+    outline.setAttribute('pointer-events', 'none');
+    outline.classList.add('selection-outline');
+    return outline;
 }
 
 function getTransformedBox(element) {

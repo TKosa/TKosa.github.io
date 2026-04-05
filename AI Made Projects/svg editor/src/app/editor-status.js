@@ -1,4 +1,4 @@
-import { getSelectedElementSnapshot } from '../state/document-selectors.js';
+import { getSelectedElementSnapshot, getSelectedIds } from '../state/document-selectors.js';
 
 export function createEditorStatus({ refs, store }) {
     let baseMessage = 'No selection';
@@ -36,6 +36,14 @@ export function createEditorStatus({ refs, store }) {
     }
 
     function syncSelectionSummary(state = store.getState()) {
+        const selectedIds = getSelectedIds(state);
+        if (selectedIds.length > 1) {
+            baseMessage = `${selectedIds.length} elements selected`;
+            showAction(state.lastAction);
+            renderMessage();
+            return;
+        }
+
         const selected = getSelectedElementSnapshot(state);
         if (!selected) {
             baseMessage = 'No selection';

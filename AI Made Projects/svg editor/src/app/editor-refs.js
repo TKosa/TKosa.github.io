@@ -6,6 +6,7 @@ const REF_SELECTORS = {
     duplicateButton: 'duplicate-button',
     exportButton: 'export-button',
     importInput: 'import-input',
+    savedSvgSelect: 'saved-svg-select',
     clearButton: 'clear-button',
     form: 'property-form',
     emptyState: 'empty-state',

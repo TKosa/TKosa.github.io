@@ -1,4 +1,4 @@
-import { getSelectedElementSnapshot } from '../state/document-selectors.js';
+import { getSelectedElementSnapshot, getSelectedIds, getSelectionKey } from '../state/document-selectors.js';
 import { clearSourceSelection, getChangedFields, highlightChangedFields, renderSourceViewer, revealElementBlock, summarizeElement } from './source-selection.js';
 
 const SOURCE_UPDATE_DEBOUNCE_MS = 350;
@@ -8,7 +8,7 @@ export function createSourceController({ store, refs, commands }) {
     let pushTimer = null;
     let revealTimer = null;
     let isEditingSource = false;
-    let lastSelectedId = null;
+    let lastSelectionKey = '';
     let lastSelectedSummary = null;
     let lastRenderedSource = '';
 
@@ -17,9 +17,18 @@ export function createSourceController({ store, refs, commands }) {
         lastRenderedSource = source;
     };
 
+    const clearSelection = () => {
+        if (typeof store.setSelection === 'function') {
+            store.setSelection([]);
+            return;
+        }
+
+        store.selectElement?.(null);
+    };
+
     const clearCanvasSelection = () => {
-        if (store.getState().selectedId !== null) {
-            store.selectElement(null);
+        if (getSelectedIds(store.getState()).length > 0) {
+            clearSelection();
         }
     };
 
@@ -76,15 +85,17 @@ export function createSourceController({ store, refs, commands }) {
 
             const nextSource = store.serialize();
             const sourceChanged = nextSource !== lastRenderedSource;
+            const selectedIds = getSelectedIds(state);
             const selected = getSelectedElementSnapshot(state);
             const currentSummary = summarizeElement(selected);
-            const selectionChanged = state.selectedId !== lastSelectedId;
+            const selectionKey = getSelectionKey(state);
+            const selectionChanged = selectionKey !== lastSelectionKey;
 
             if (selectionChanged) {
                 clearTimeout(pushTimer);
                 renderPlainSource(nextSource);
                 clearTimeout(revealTimer);
-                if (selected) {
+                if (selectedIds.length === 1 && selected) {
                     revealTimer = window.setTimeout(() => {
                         if (!revealElementBlock(refs.sourceViewer, nextSource, selected)) {
                             clearSourceSelection(refs.sourceViewer, nextSource);
@@ -94,14 +105,14 @@ export function createSourceController({ store, refs, commands }) {
                     clearSourceSelection(refs.sourceViewer, nextSource);
                 }
 
-                lastSelectedId = state.selectedId;
+                lastSelectionKey = selectionKey;
                 lastSelectedSummary = currentSummary;
                 return;
             }
 
             clearTimeout(pushTimer);
             pushTimer = window.setTimeout(() => {
-                if (selected) {
+                if (selectedIds.length === 1 && selected) {
                     const changedFields = getChangedFields(lastSelectedSummary, currentSummary, true);
                     if (sourceChanged && changedFields.length > 0) {
                         if (!highlightChangedFields(refs.sourceViewer, nextSource, selected, changedFields)) {
@@ -116,7 +127,7 @@ export function createSourceController({ store, refs, commands }) {
                     renderPlainSource(nextSource);
                 }
 
-                lastSelectedId = state.selectedId;
+                lastSelectionKey = selectionKey;
                 lastSelectedSummary = currentSummary;
             }, SOURCE_UPDATE_DEBOUNCE_MS);
         }

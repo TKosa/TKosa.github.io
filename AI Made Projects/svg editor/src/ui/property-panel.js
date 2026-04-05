@@ -1,4 +1,4 @@
-import { findElementByEditorId, getElementAttributes, getSelectedElementSnapshot } from '../state/document-selectors.js';
+import { findElementByEditorId, getElementAttributes, getSelectedElementSnapshot, getSelectedIds } from '../state/document-selectors.js';
 
 export function createPropertyPanel({ store, refs }) {
     let lastSelectedId = null;
@@ -88,6 +88,16 @@ export function createPropertyPanel({ store, refs }) {
 
     return {
         render(state) {
+            const selectedIds = getSelectedIds(state);
+            if (selectedIds.length > 1) {
+                draftValues.clear();
+                lastSelectedId = null;
+                refs.form.replaceChildren();
+                refs.emptyState.hidden = false;
+                refs.emptyState.textContent = 'Multiple elements selected. Select one element to edit its properties.';
+                return;
+            }
+
             const selected = getSelectedElementSnapshot(state);
             const selectedId = selected?.getAttribute('data-editor-id') ?? null;
 
@@ -100,6 +110,7 @@ export function createPropertyPanel({ store, refs }) {
 
             if (!selected) {
                 refs.emptyState.hidden = false;
+                refs.emptyState.textContent = 'Select an element to edit its properties.';
                 return;
             }
 

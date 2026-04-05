@@ -1,10 +1,14 @@
 import { downloadTextFile } from '../core/utils.js';
-import { getSelectedElementSnapshot } from '../state/document-selectors.js';
+import { getSelectedElementSnapshot, getSelectedElementSnapshots, getSelectedIds } from '../state/document-selectors.js';
 
 export function createEditorCommands({ store, status }) {
     const getSelectedElementName = () => {
-        const selected = getSelectedElementSnapshot(store.getState());
-        return selected ? selected.tagName.toLowerCase() : null;
+        const selectedElements = getSelectedElementSnapshots(store.getState());
+        if (selectedElements.length === 1) {
+            return selectedElements[0].tagName.toLowerCase();
+        }
+
+        return selectedElements.length > 1 ? `${selectedElements.length}-elements` : null;
     };
 
     return {
@@ -28,30 +32,31 @@ export function createEditorCommands({ store, status }) {
             return false;
         },
         duplicateSelection() {
-            const selectedId = store.getState().selectedId;
-            if (store.duplicateSelectedElement('duplicate-selection', [selectedId])) {
-                status.setMessage('Element duplicated');
+            const selectedIds = getSelectedIds(store.getState());
+            if (store.duplicateSelectedElement('duplicate-selection', [selectedIds.length])) {
+                status.setMessage(selectedIds.length > 1 ? 'Selection duplicated' : 'Element duplicated');
             }
         },
         deleteSelection() {
-            const selectedId = store.getState().selectedId;
-            if (store.deleteSelectedElement('delete-selection', [selectedId])) {
-                status.setMessage('Element deleted');
+            const selectedIds = getSelectedIds(store.getState());
+            if (store.deleteSelectedElement('delete-selection', [selectedIds.length])) {
+                status.setMessage(selectedIds.length > 1 ? 'Selection deleted' : 'Element deleted');
             }
         },
         copySelection() {
             const elementName = getSelectedElementName();
             if (store.copySelectedElement('copy-selection', [elementName])) {
-                status.setMessage('Element copied');
+                const selectionCount = getSelectedIds(store.getState()).length;
+                status.setMessage(selectionCount > 1 ? 'Selection copied' : 'Element copied');
                 return true;
             }
 
             return false;
         },
         pasteSelection() {
-            const selectedId = store.getState().selectedId;
-            if (store.pasteClipboardElement('paste-selection', [selectedId])) {
-                status.setMessage('Element pasted');
+            const selectedIds = getSelectedIds(store.getState());
+            if (store.pasteClipboardElement('paste-selection', [selectedIds.length])) {
+                status.setMessage('Selection pasted');
                 return true;
             }
 

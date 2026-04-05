@@ -9,7 +9,6 @@ import {
     getFirstSelectableEditorId
 } from '../svg/document-dom.js';
 import {
-    insertClipboardClone,
     insertPoint,
     movePoint,
     nudgeElement,
@@ -66,17 +65,22 @@ export function createStore() {
     }
 
     function resolveSelection(selection) {
-        if (selection instanceof Element) {
-            return selection.getAttribute('data-editor-id');
+        if (Array.isArray(selection)) {
+            return normalizeSelection(selection, state.svgRoot);
         }
 
-        return selection ?? null;
+        if (selection instanceof Element) {
+            return normalizeSelection([selection.getAttribute('data-editor-id')], state.svgRoot);
+        }
+
+        return normalizeSelection(selection ? [selection] : [], state.svgRoot);
     }
 
     function createHistoryEntry(snapshotState = state) {
         return {
             svgRoot: cloneSvgRoot(snapshotState.svgRoot),
-            selectedId: snapshotState.selectedId
+            selectedId: snapshotState.selectedId,
+            selectedIds: [...(snapshotState.selectedIds ?? [])]
         };
     }
 
@@ -125,13 +129,13 @@ export function createStore() {
     }
 
     function restoreHistoryEntry(entry) {
-        commitSvg(cloneSvgRoot(entry.svgRoot), entry.selectedId, { recordHistory: false });
+        commitSvg(cloneSvgRoot(entry.svgRoot), entry.selectedIds ?? entry.selectedId, { recordHistory: false });
     }
 
-    function commitSvg(svgRoot, selection = state.selectedId, options = {}) {
+    function commitSvg(svgRoot, selection = state.selectedIds, options = {}) {
         const { recordHistory = true, actionName = null, actionArgs = [] } = options;
         assignEditorIds(svgRoot);
-        const resolvedSelection = resolveSelection(selection);
+        const resolvedSelection = normalizeSelection(selection, svgRoot);
         const svgChanged = !state.svgRoot.isEqualNode(svgRoot);
         const action = recordHistory && svgChanged
             ? createAction(actionName, actionArgs)
@@ -144,7 +148,8 @@ export function createStore() {
         setState({
             ...state,
             svgRoot,
-            selectedId: resolvedSelection,
+            selectedId: resolvedSelection.selectedId,
+            selectedIds: resolvedSelection.selectedIds,
             nextElementId: computeNextElementId(svgRoot),
             lastAction: action
         });
@@ -154,7 +159,7 @@ export function createStore() {
         }
     }
 
-    function updateSvg(actionName, actionArgs, mutator, selection = state.selectedId) {
+    function updateSvg(actionName, actionArgs, mutator, selection = state.selectedIds) {
         const svgRoot = cloneSvgRoot(state.svgRoot);
         mutator(svgRoot);
         commitSvg(svgRoot, selection, { actionName, actionArgs });
@@ -180,11 +185,43 @@ export function createStore() {
                 y: point.y
             };
         },
-        selectElement(editorId) {
+        setSelection(selection) {
+            const resolvedSelection = normalizeSelection(selection, state.svgRoot);
             setState({
                 ...state,
-                selectedId: editorId
+                selectedId: resolvedSelection.selectedId,
+                selectedIds: resolvedSelection.selectedIds
             });
+        },
+        selectElement(editorId, options = {}) {
+            const { additive = false, toggle = false } = options;
+            if (!editorId) {
+                this.setSelection([]);
+                return;
+            }
+
+            if (!additive && !toggle) {
+                this.setSelection([editorId]);
+                return;
+            }
+
+            const nextSelection = [...state.selectedIds];
+            const existingIndex = nextSelection.indexOf(editorId);
+            if (existingIndex !== -1) {
+                if (toggle) {
+                    nextSelection.splice(existingIndex, 1);
+                } else {
+                    nextSelection.splice(existingIndex, 1);
+                    nextSelection.push(editorId);
+                }
+            } else {
+                nextSelection.push(editorId);
+            }
+
+            this.setSelection(nextSelection);
+        },
+        isElementSelected(editorId) {
+            return state.selectedIds.includes(editorId);
         },
         importFromString(actionName, actionArgs, source) {
             commitSvg(parseSvgString(source), null, { actionName, actionArgs });
@@ -203,58 +240,48 @@ export function createStore() {
             commitSvg(svgRoot, element, { actionName, actionArgs });
         },
         deleteSelectedElement(actionName, actionArgs) {
-            if (!state.selectedId) {
+            if (state.selectedIds.length === 0) {
                 return false;
             }
 
             const svgRoot = cloneSvgRoot(state.svgRoot);
-            const selected = findElementByEditorId(svgRoot, state.selectedId);
-            if (!selected) {
+            const selectedElements = getElementsBySelection(svgRoot, state.selectedIds);
+            if (selectedElements.length === 0) {
                 return false;
             }
 
-            selected.remove();
+            selectedElements.forEach((selected) => selected.remove());
             commitSvg(svgRoot, null, { actionName, actionArgs });
             return true;
         },
         duplicateSelectedElement(actionName, actionArgs) {
-            if (!state.selectedId) {
+            if (state.selectedIds.length === 0) {
                 return false;
             }
 
-            const svgRoot = cloneSvgRoot(state.svgRoot);
-            const selected = findElementByEditorId(svgRoot, state.selectedId);
-            if (!selected) {
+            const clipboardData = createClipboardSnapshot(state.svgRoot, state.selectedIds, lastPointerPosition);
+            if (!clipboardData) {
                 return false;
             }
-
-            const clone = selected.cloneNode(true);
-            const anchor = getElementBottomRight(svgRoot, selected) ?? getElementOrigin(selected);
-            refreshElementIds(clone, state.nextElementId);
-            selected.parentNode?.insertBefore(clone, selected.nextSibling);
-            if (anchor && !alignElementTopLeftToAnchor(svgRoot, clone, anchor)) {
-                nudgeElement(clone, 24, 24);
-            }
-            commitSvg(svgRoot, clone, { actionName, actionArgs });
-            return true;
+            return pasteClipboardSnapshot(clipboardData, {
+                state,
+                lastPointerPosition,
+                actionName,
+                actionArgs,
+                commitSvg
+            });
         },
         copySelectedElement(actionName, actionArgs) {
-            if (!state.selectedId) {
+            if (state.selectedIds.length === 0) {
                 clipboardSnapshot = null;
                 return false;
             }
 
-            const selected = findElementByEditorId(state.svgRoot, state.selectedId);
-            if (!selected) {
+            clipboardSnapshot = createClipboardSnapshot(state.svgRoot, state.selectedIds, lastPointerPosition);
+            if (!clipboardSnapshot) {
                 clipboardSnapshot = null;
                 return false;
             }
-
-            clipboardSnapshot = {
-                element: sanitizeClipboardElement(selected.cloneNode(true)),
-                anchor: getClipboardAnchor(state.svgRoot, state.selectedId),
-                pointerPositionAtCopy: clonePoint(lastPointerPosition)
-            };
             recordAction(actionName, actionArgs);
             return true;
         },
@@ -263,29 +290,17 @@ export function createStore() {
                 return false;
             }
 
-            const svgRoot = cloneSvgRoot(state.svgRoot);
-            const clone = clipboardSnapshot.element.cloneNode(true);
-            refreshElementIds(clone, state.nextElementId);
-
-            const target = findElementByEditorId(svgRoot, state.selectedId);
-            insertClipboardClone(svgRoot, target, clone);
-            const shouldUsePointerPosition = shouldPasteAtPointer(lastPointerPosition, clipboardSnapshot.pointerPositionAtCopy);
-            const didAlign = shouldUsePointerPosition
-                ? alignElementCenterToAnchor(svgRoot, clone, lastPointerPosition)
-                : clipboardSnapshot.anchor
-                    ? alignElementTopLeftToAnchor(svgRoot, clone, clipboardSnapshot.anchor)
-                    : false;
-            if (!didAlign) {
-                nudgeElement(clone, 24, 24);
-            }
-
-            clipboardSnapshot = {
-                element: sanitizeClipboardElement(clone.cloneNode(true)),
-                anchor: getElementBottomRight(svgRoot, clone) ?? clipboardSnapshot.anchor,
-                pointerPositionAtCopy: clonePoint(lastPointerPosition)
-            };
-            commitSvg(svgRoot, clone, { actionName, actionArgs });
-            return true;
+            const didPaste = pasteClipboardSnapshot(clipboardSnapshot, {
+                state,
+                lastPointerPosition,
+                actionName,
+                actionArgs,
+                commitSvg,
+                onSnapshotUpdated(nextSnapshot) {
+                    clipboardSnapshot = nextSnapshot;
+                }
+            });
+            return didPaste;
         },
         updateCanvasSize(actionName, actionArgs, width, height) {
             updateSvg(actionName, actionArgs, (svgRoot) => {
@@ -322,6 +337,13 @@ export function createStore() {
 
                 translateElement(element, deltaX, deltaY);
             });
+        },
+        moveSelectedElements(actionName, actionArgs, editorIds, deltaX, deltaY) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                getElementsBySelection(svgRoot, editorIds).forEach((element) => {
+                    translateElement(element, deltaX, deltaY);
+                });
+            }, editorIds);
         },
         setElementTransform(actionName, actionArgs, editorId, transform) {
             updateSvg(actionName, actionArgs, (svgRoot) => {
@@ -412,6 +434,178 @@ export function createStore() {
         canRedo() {
             return !hasPendingHistoryChanges() && history.redoStack.length > 0;
         }
+    };
+}
+
+function normalizeSelection(selection, svgRoot) {
+    const selectionValues = Array.isArray(selection)
+        ? selection
+        : selection
+            ? [selection]
+            : [];
+
+    const selectedIds = Array.from(new Set(
+        selectionValues
+            .map((value) => {
+                if (value instanceof Element) {
+                    return value.getAttribute('data-editor-id');
+                }
+
+                return typeof value === 'string' ? value : null;
+            })
+            .filter(Boolean)
+            .filter((editorId) => findElementByEditorId(svgRoot, editorId))
+    ));
+    const topLevelSelection = selectedIds.filter((editorId) => {
+        const element = findElementByEditorId(svgRoot, editorId);
+        let current = element?.parentElement;
+        while (current) {
+            const currentId = current.getAttribute?.('data-editor-id');
+            if (currentId && selectedIds.includes(currentId)) {
+                return false;
+            }
+
+            current = current.parentElement;
+        }
+
+        return true;
+    });
+
+    return {
+        selectedId: topLevelSelection.at(-1) ?? null,
+        selectedIds: topLevelSelection
+    };
+}
+
+function getElementsBySelection(svgRoot, editorIds) {
+    return (editorIds ?? [])
+        .map((editorId) => findElementByEditorId(svgRoot, editorId))
+        .filter(Boolean);
+}
+
+function createClipboardSnapshot(svgRoot, editorIds, pointerPositionAtCopy) {
+    const measuredRoot = cloneSvgRoot(svgRoot);
+    const selectedElements = getElementsBySelection(measuredRoot, editorIds);
+    if (selectedElements.length === 0) {
+        return null;
+    }
+
+    const selectionBounds = measureSelectionBounds(measuredRoot, selectedElements);
+    const pointer = clonePoint(pointerPositionAtCopy);
+
+    return {
+        items: selectedElements.map((element) => {
+            const box = measureElementBox(measuredRoot, element);
+            const center = box
+                ? { x: box.x + (box.width / 2), y: box.y + (box.height / 2) }
+                : getElementOrigin(element);
+            return {
+                element: sanitizeClipboardElement(element.cloneNode(true)),
+                centerOffsetFromPointer: pointer && center
+                    ? { x: center.x - pointer.x, y: center.y - pointer.y }
+                    : null
+            };
+        }),
+        anchor: selectionBounds
+            ? { x: selectionBounds.x + selectionBounds.width, y: selectionBounds.y + selectionBounds.height }
+            : null,
+        pointerPositionAtCopy: pointer
+    };
+}
+
+function pasteClipboardSnapshot(snapshot, context) {
+    const { state, lastPointerPosition, actionName, actionArgs, commitSvg, onSnapshotUpdated = null } = context;
+    const svgRoot = cloneSvgRoot(state.svgRoot);
+    const clones = snapshot.items.map((item) => item.element.cloneNode(true));
+    if (clones.length === 0) {
+        return false;
+    }
+
+    let nextElementId = computeNextElementId(svgRoot);
+    clones.forEach((clone) => {
+        refreshElementIds(clone, nextElementId);
+        nextElementId = computeNextElementId(clone);
+    });
+    insertClipboardClones(svgRoot, findElementByEditorId(svgRoot, state.selectedId), clones);
+
+    const shouldUsePointerPosition = shouldPasteAtPointer(lastPointerPosition, snapshot.pointerPositionAtCopy);
+    if (shouldUsePointerPosition) {
+        clones.forEach((clone, index) => {
+            const centerOffset = snapshot.items[index]?.centerOffsetFromPointer;
+            const anchor = centerOffset && lastPointerPosition
+                ? {
+                    x: lastPointerPosition.x + centerOffset.x,
+                    y: lastPointerPosition.y + centerOffset.y
+                }
+                : lastPointerPosition;
+            if (!alignElementCenterToAnchor(svgRoot, clone, anchor)) {
+                nudgeElement(clone, 24, 24);
+            }
+        });
+    } else {
+        const selectionBounds = measureSelectionBounds(svgRoot, clones);
+        const didAlign = snapshot.anchor && selectionBounds
+            ? alignSelectionTopLeftToAnchor(svgRoot, clones, snapshot.anchor, selectionBounds)
+            : false;
+        if (!didAlign) {
+            clones.forEach((clone) => nudgeElement(clone, 24, 24));
+        }
+    }
+
+    assignEditorIds(svgRoot);
+    const nextSnapshot = createClipboardSnapshot(svgRoot, clones.map((clone) => clone.getAttribute('data-editor-id')), lastPointerPosition)
+        ?? snapshot;
+    onSnapshotUpdated?.(nextSnapshot);
+    commitSvg(svgRoot, clones, { actionName, actionArgs });
+    return true;
+}
+
+function insertClipboardClones(svgRoot, target, clones) {
+    if (!target || target === svgRoot) {
+        svgRoot.append(...clones);
+        return;
+    }
+
+    if (target.tagName.toLowerCase() === 'g') {
+        target.append(...clones);
+        return;
+    }
+
+    const parent = target.parentNode;
+    const referenceNode = target.nextSibling;
+    clones.forEach((clone) => parent?.insertBefore(clone, referenceNode));
+}
+
+function alignSelectionTopLeftToAnchor(svgRoot, elements, anchor, selectionBounds = null) {
+    const bounds = selectionBounds ?? measureSelectionBounds(svgRoot, elements);
+    if (!bounds || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
+        return false;
+    }
+
+    elements.forEach((element) => {
+        const localDelta = toParentLocalDelta(element, anchor.x - bounds.x, anchor.y - bounds.y);
+        translateElement(element, localDelta.x, localDelta.y);
+    });
+    return true;
+}
+
+function measureSelectionBounds(svgRoot, elements) {
+    const boxes = elements
+        .map((element) => measureElementBox(svgRoot, element))
+        .filter(Boolean);
+    if (boxes.length === 0) {
+        return null;
+    }
+
+    const minX = Math.min(...boxes.map((box) => box.x));
+    const minY = Math.min(...boxes.map((box) => box.y));
+    const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+    const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+    return {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY
     };
 }
 
@@ -591,9 +785,11 @@ function toParentLocalDelta(element, deltaX, deltaY) {
 export function createInitialState() {
     const svgRoot = createDefaultSvg();
     assignEditorIds(svgRoot);
+    const selectedId = getFirstSelectableEditorId(svgRoot);
     return {
         svgRoot,
-        selectedId: getFirstSelectableEditorId(svgRoot),
+        selectedId,
+        selectedIds: selectedId ? [selectedId] : [],
         nextElementId: computeNextElementId(svgRoot),
         lastAction: null
     };
