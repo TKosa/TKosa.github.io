@@ -341,9 +341,34 @@ export function createStore() {
         moveSelectedElements(actionName, actionArgs, editorIds, deltaX, deltaY) {
             updateSvg(actionName, actionArgs, (svgRoot) => {
                 getElementsBySelection(svgRoot, editorIds).forEach((element) => {
-                    translateElement(element, deltaX, deltaY);
+                    const localDelta = toParentLocalDelta(element, deltaX, deltaY);
+                    translateElement(element, localDelta.x, localDelta.y);
                 });
             }, editorIds);
+        },
+        setMultipleElementTransforms(actionName, actionArgs, updates) {
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                updates.forEach(({ editorId, transform }) => {
+                    const element = findElementByEditorId(svgRoot, editorId);
+                    if (!element) {
+                        return;
+                    }
+
+                    setElementTransform(element, transform);
+                });
+            }, updates.map(({ editorId }) => editorId));
+        },
+        normalizeSelectedElementPosition(actionName, actionArgs, editorId) {
+            let didNormalize = false;
+            updateSvg(actionName, actionArgs, (svgRoot) => {
+                const element = findElementByEditorId(svgRoot, editorId);
+                if (!element) {
+                    return;
+                }
+
+                didNormalize = normalizeElementPosition(element);
+            });
+            return didNormalize;
         },
         setElementTransform(actionName, actionArgs, editorId, transform) {
             updateSvg(actionName, actionArgs, (svgRoot) => {
@@ -780,6 +805,82 @@ function toParentLocalDelta(element, deltaX, deltaY) {
         void error;
         return { x: deltaX, y: deltaY };
     }
+}
+
+function normalizeElementPosition(element) {
+    if (!(element instanceof SVGGraphicsElement) || !element.hasAttribute('transform')) {
+        return false;
+    }
+
+    const transformList = element.transform?.baseVal;
+    const consolidated = transformList?.consolidate();
+    const matrix = consolidated?.matrix;
+    if (!matrix) {
+        return false;
+    }
+
+    const linearMatrix = new DOMMatrix([matrix.a, matrix.b, matrix.c, matrix.d, 0, 0]);
+    let inverseLinearMatrix;
+    try {
+        inverseLinearMatrix = linearMatrix.inverse();
+    } catch (error) {
+        void error;
+        return false;
+    }
+
+    const localDelta = new DOMPoint(matrix.e, matrix.f).matrixTransform(inverseLinearMatrix);
+    if (!Number.isFinite(localDelta.x) || !Number.isFinite(localDelta.y)) {
+        return false;
+    }
+
+    if (!applyPositionDelta(element, localDelta.x, localDelta.y)) {
+        return false;
+    }
+
+    const nextMatrix = new DOMMatrix([matrix.a, matrix.b, matrix.c, matrix.d, 0, 0]);
+    const values = [nextMatrix.a, nextMatrix.b, nextMatrix.c, nextMatrix.d, nextMatrix.e, nextMatrix.f]
+        .map((value) => (Math.abs(value) < 0.0000001 ? 0 : Number(value.toFixed(6))));
+    const isIdentity = values[0] === 1 && values[1] === 0 && values[2] === 0 && values[3] === 1 && values[4] === 0 && values[5] === 0;
+    setElementTransform(element, isIdentity ? '' : `matrix(${values.join(' ')})`);
+    return true;
+}
+
+function applyPositionDelta(element, deltaX, deltaY) {
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === 'rect' || tag === 'text' || tag === 'image' || tag === 'use') {
+        bumpAttribute(element, 'x', deltaX);
+        bumpAttribute(element, 'y', deltaY);
+        return true;
+    }
+
+    if (tag === 'circle' || tag === 'ellipse') {
+        bumpAttribute(element, 'cx', deltaX);
+        bumpAttribute(element, 'cy', deltaY);
+        return true;
+    }
+
+    if (tag === 'line') {
+        bumpAttribute(element, 'x1', deltaX);
+        bumpAttribute(element, 'x2', deltaX);
+        bumpAttribute(element, 'y1', deltaY);
+        bumpAttribute(element, 'y2', deltaY);
+        return true;
+    }
+
+    if (tag === 'polygon' || tag === 'polyline') {
+        const points = parsePointList(element);
+        if (points.length === 0) {
+            return false;
+        }
+
+        element.setAttribute('points', points
+            .map((point) => `${point.x + deltaX},${point.y + deltaY}`)
+            .join(' '));
+        return true;
+    }
+
+    return false;
 }
 
 export function createInitialState() {

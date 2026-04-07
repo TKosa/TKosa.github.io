@@ -86,6 +86,27 @@ export function createPropertyPanel({ store, refs }) {
         target.blur();
     });
 
+    refs.form.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement)) {
+            return;
+        }
+
+        const editorId = target.dataset.editorId;
+        if (!editorId) {
+            return;
+        }
+
+        if (target.dataset.action === 'normalize-position' && typeof store.normalizeSelectedElementPosition === 'function') {
+            store.normalizeSelectedElementPosition('normalize-position', [editorId], editorId);
+            return;
+        }
+
+        if (target.dataset.action === 'clear-transform') {
+            store.setElementTransform?.('clear-transform', [editorId], editorId, '');
+        }
+    });
+
     return {
         render(state) {
             const selectedIds = getSelectedIds(state);
@@ -119,10 +140,14 @@ export function createPropertyPanel({ store, refs }) {
             const grid = document.createElement('div');
             grid.className = 'property-grid';
 
-            getElementAttributes(selected).forEach(({ name, value }) => {
+            const transformValue = selected.getAttribute('transform') ?? '';
+
+            getElementAttributes(selected)
+                .filter(({ name }) => name !== 'transform')
+                .forEach(({ name, value }) => {
                 const draftValue = draftValues.get(getDraftKey(selectedId, name));
                 grid.appendChild(createPropertyField(name, draftValue ?? value, selectedId));
-            });
+                });
 
             if (selected.tagName.toLowerCase() === 'text') {
                 const draftValue = draftValues.get(getDraftKey(selectedId, 'content'));
@@ -130,6 +155,10 @@ export function createPropertyPanel({ store, refs }) {
             }
 
             refs.form.appendChild(grid);
+
+            if (transformValue) {
+                refs.form.appendChild(createTransformSection(selectedId, canNormalizeElementPosition(selected)));
+            }
         }
     };
 }
@@ -156,6 +185,48 @@ function createPropertyField(name, value, editorId, multiline = false) {
     return row;
 }
 
+function createTransformSection(editorId, canNormalizePosition) {
+    const section = document.createElement('section');
+    section.className = 'transform-section';
+
+    const heading = document.createElement('h3');
+    heading.className = 'transform-section-title';
+    heading.textContent = 'Transform';
+
+    const actions = document.createElement('div');
+    actions.className = 'property-actions';
+
+    const clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.className = 'secondary-button';
+    clearButton.dataset.action = 'clear-transform';
+    clearButton.dataset.editorId = editorId;
+    clearButton.textContent = 'Clear Transform';
+
+    actions.append(clearButton);
+
+    if (canNormalizePosition) {
+        const flattenButton = document.createElement('button');
+        flattenButton.type = 'button';
+        flattenButton.className = 'secondary-button';
+        flattenButton.dataset.action = 'normalize-position';
+        flattenButton.dataset.editorId = editorId;
+        flattenButton.textContent = 'Bake Translation';
+        actions.append(flattenButton);
+    }
+
+    section.append(heading, actions);
+    return section;
+}
+
+function canNormalizeElementPosition(element) {
+    if (!(element instanceof SVGGraphicsElement) || !element.hasAttribute('transform')) {
+        return false;
+    }
+
+    return ['rect', 'text', 'image', 'use', 'circle', 'ellipse', 'line', 'polygon', 'polyline']
+        .includes(element.tagName.toLowerCase());
+}
 function inferInputType(name, value) {
     if (isHexColor(value) && name !== 'id') {
         return 'color';

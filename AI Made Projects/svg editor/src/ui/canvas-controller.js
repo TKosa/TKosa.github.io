@@ -3,6 +3,7 @@ import { findElementByEditorId, getCanvasMetrics, getSelectedIds, resolveSelecta
 import { parsePointList } from '../svg/element-operations.js';
 
 const HANDLE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const ROTATION_DIRECTIONS = ['nw', 'ne', 'se', 'sw'];
 const HANDLE_CURSORS = {
     n: 'ns-resize',
     ne: 'nesw-resize',
@@ -13,6 +14,7 @@ const HANDLE_CURSORS = {
     w: 'ew-resize',
     nw: 'nwse-resize'
 };
+const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M19.5 7.5A8.5 8.5 0 1 0 22 14' fill='none' stroke='%232d7ff9' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M17.5 4.5h5v5' fill='none' stroke='%232d7ff9' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 14, grab`;
 
 export function createCanvasController({ store, refs, status }) {
     let dragState = null;
@@ -47,6 +49,21 @@ export function createCanvasController({ store, refs, status }) {
         if (typeof store.updateElementAttribute === 'function') {
             store.updateElementAttribute(actionName, actionArgs, editorId, 'transform', transform ?? '');
         }
+    };
+
+    const applyMultipleElementTransforms = (actionName, actionArgs, updates) => {
+        if (updates.length === 0) {
+            return;
+        }
+
+        if (typeof store.setMultipleElementTransforms === 'function') {
+            store.setMultipleElementTransforms(actionName, actionArgs, updates);
+            return;
+        }
+
+        updates.forEach(({ editorId, transform }) => {
+            applyElementTransform(actionName, actionArgs, editorId, transform);
+        });
     };
 
     const clearMarqueeOverlay = () => {
@@ -200,6 +217,51 @@ export function createCanvasController({ store, refs, status }) {
         refs.canvas.setPointerCapture(event.pointerId);
     };
 
+    const beginRotateDrag = (event, handleNode) => {
+        if (!(handleNode instanceof SVGElement) || event.button !== 0) {
+            return;
+        }
+
+        const editorId = handleNode.getAttribute('data-rotate-editor-id') ?? store.getState().selectedId;
+        const selected = editorId ? findElementByEditorId(refs.canvas, editorId) : null;
+        const currentMatrix = selected ? toDomMatrix(selected.getCTM()) : null;
+        const parentMatrix = selected ? getParentMatrix(selected) : null;
+        if (!selected || !currentMatrix || !parentMatrix) {
+            return;
+        }
+
+        const localBox = selected.getBBox();
+        const centerPoint = new DOMPoint(
+            localBox.x + (localBox.width / 2),
+            localBox.y + (localBox.height / 2)
+        ).matrixTransform(currentMatrix);
+        const point = getSvgPoint(event, refs.canvas);
+        const center = {
+            x: centerPoint.x,
+            y: centerPoint.y
+        };
+        const startAngle = Math.atan2(point.y - center.y, point.x - center.x);
+        if (!Number.isFinite(startAngle)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        refs.canvasStage.style.cursor = ROTATE_CURSOR;
+        dragState = {
+            mode: 'rotate-element',
+            editorId,
+            pointerId: event.pointerId,
+            center,
+            startAngle,
+            currentMatrix,
+            parentMatrix,
+            originalTransform: selected.getAttribute('transform') ?? '',
+            elementName: getElementLabel(selected)
+        };
+        refs.canvas.setPointerCapture(event.pointerId);
+    };
+
     const updateHoverCoordinates = (event) => {
         const point = getSvgPoint(event, refs.canvas);
         store.setLastPointerPosition?.(point);
@@ -247,6 +309,22 @@ export function createCanvasController({ store, refs, status }) {
             return;
         }
 
+        if (dragState.mode === 'rotate-element') {
+            const point = getSvgPoint(event, refs.canvas);
+            const transform = getRotationTransform(dragState, point);
+            if (transform === null) {
+                return;
+            }
+
+            applyElementTransform(
+                'rotate',
+                [dragState.elementName, Math.round(point.x), Math.round(point.y)],
+                dragState.editorId,
+                transform
+            );
+            return;
+        }
+
         if (dragState.mode === 'move-vertex') {
             const point = getSvgPoint(event, refs.canvas);
             const localPoint = toLocalPoint(point, dragState.inverseMatrix);
@@ -281,13 +359,30 @@ export function createCanvasController({ store, refs, status }) {
         }
 
         if (dragState.mode === 'move-selection') {
-            store.moveSelectedElements(
-                'drag',
-                formatPointArgs(`${dragState.editorIds.length}-elements`, point.x, point.y),
-                dragState.editorIds,
-                deltaX,
-                deltaY
-            );
+            if (dragState.selectionTransformDrags?.length) {
+                const updates = dragState.selectionTransformDrags
+                    .map((entry) => ({
+                        editorId: entry.editorId,
+                        transform: getTranslateTransform({ transformDrag: entry.transformDrag }, point)
+                    }))
+                    .filter((entry) => entry.transform !== null);
+                applyMultipleElementTransforms(
+                    'drag',
+                    formatPointArgs(`${dragState.editorIds.length}-elements`, point.x, point.y),
+                    updates
+                );
+            }
+
+            if (dragState.plainSelectionIds?.length) {
+                store.moveSelectedElements(
+                    'drag',
+                    formatPointArgs(`${dragState.plainSelectionIds.length}-elements`, point.x, point.y),
+                    dragState.plainSelectionIds,
+                    deltaX,
+                    deltaY
+                );
+            }
+
             dragState.previous = point;
             return;
         }
@@ -376,6 +471,9 @@ export function createCanvasController({ store, refs, status }) {
             : editorId
                 ? [editorId]
                 : [];
+        const { plainSelectionIds, selectionTransformDrags } = dragSelectionIds.length > 1
+            ? partitionSelectionDragTargets(refs.canvas, dragSelectionIds, point)
+            : { plainSelectionIds: [], selectionTransformDrags: [] };
         applySelection(dragSelectionIds);
         dragState = {
             mode: dragSelectionIds.length > 1 ? 'move-selection' : 'move-element',
@@ -384,6 +482,8 @@ export function createCanvasController({ store, refs, status }) {
             elementName: getElementLabel(target),
             pointerId: event.pointerId,
             previous: point,
+            plainSelectionIds,
+            selectionTransformDrags,
             transformDrag: dragSelectionIds.length === 1 ? transformDrag : null
         };
         refs.canvas.setPointerCapture(event.pointerId);
@@ -427,6 +527,10 @@ export function createCanvasController({ store, refs, status }) {
             refs.canvas.releasePointerCapture(event.pointerId);
         }
 
+        if (dragState.mode === 'rotate-element' && refs.canvas.hasPointerCapture(event.pointerId)) {
+            refs.canvas.releasePointerCapture(event.pointerId);
+        }
+
         refs.canvasStage.style.cursor = '';
         setStageMode();
         dragState = null;
@@ -441,6 +545,7 @@ export function createCanvasController({ store, refs, status }) {
     return {
         render(state) {
             renderSvg(refs.canvas, state, zoom, {
+                beginRotateDrag,
                 beginResizeDrag,
                 beginVertexDrag,
                 insertVertexAtHandle,
@@ -532,6 +637,9 @@ function renderSelectionOverlay(canvas, selected, editorId, zoom, overlayHandler
         const handleSize = 12 / Math.max(zoom, 0.001);
         HANDLE_DIRECTIONS.forEach((handle) => {
             overlay.appendChild(createResizeHandle(canvas, box, handle, editorId, handleSize, overlayHandlers.beginResizeDrag));
+        });
+        ROTATION_DIRECTIONS.forEach((handle) => {
+            overlay.appendChild(createRotationHandle(canvas, box, handle, handleSize, editorId, overlayHandlers.beginRotateDrag));
         });
 
         canvas.appendChild(overlay);
@@ -683,6 +791,25 @@ function createResizeHandle(canvas, box, handle, editorId, size, beginResizeDrag
     return handleNode;
 }
 
+function createRotationHandle(canvas, box, handle, size, editorId, beginRotateDrag) {
+    const hitSize = Math.max(size, 12);
+    const point = getRotationHandlePoint(box, handle, Math.max(size * 1.8, 18));
+    const handleNode = document.createElementNS(canvas.namespaceURI, 'rect');
+    handleNode.setAttribute('x', String(point.x - (hitSize / 2)));
+    handleNode.setAttribute('y', String(point.y - (hitSize / 2)));
+    handleNode.setAttribute('width', String(hitSize));
+    handleNode.setAttribute('height', String(hitSize));
+    handleNode.setAttribute('fill', '#ffffff');
+    handleNode.setAttribute('fill-opacity', '0.001');
+    handleNode.setAttribute('stroke', 'none');
+    handleNode.setAttribute('pointer-events', 'all');
+    handleNode.setAttribute('data-rotate-editor-id', editorId);
+    handleNode.setAttribute('data-rotate-handle', handle);
+    handleNode.style.cursor = ROTATE_CURSOR;
+    handleNode.addEventListener('pointerdown', (event) => beginRotateDrag(event, handleNode));
+    return handleNode;
+}
+
 function renderPointEditingOverlay(canvas, overlay, element, editorId, handleSize, beginVertexDrag, insertVertexAtHandle, removeVertexFromHandle) {
     const localPoints = parsePointList(element);
     const matrix = element.getCTM();
@@ -785,6 +912,20 @@ function getMovingPoint(box, handle) {
     return getHandlePoint(box, handle);
 }
 
+function getRotationHandlePoint(box, handle, distance) {
+    const point = getHandlePoint(box, handle);
+    const centerX = box.x + (box.width / 2);
+    const centerY = box.y + (box.height / 2);
+    const deltaX = point.x - centerX;
+    const deltaY = point.y - centerY;
+    const length = Math.hypot(deltaX, deltaY) || 1;
+
+    return {
+        x: point.x + ((deltaX / length) * distance),
+        y: point.y + ((deltaY / length) * distance)
+    };
+}
+
 function getResizeTransform(dragState, point) {
     const scaleX = getAxisScale(point.x, dragState.anchor.x, dragState.movingPoint.x, hasHorizontalResize(dragState.handle));
     const scaleY = getAxisScale(point.y, dragState.anchor.y, dragState.movingPoint.y, hasVerticalResize(dragState.handle));
@@ -805,6 +946,25 @@ function getResizeTransform(dragState, point) {
         .translateSelf(dragState.anchor.x, dragState.anchor.y)
         .scaleSelf(scaleX, scaleY)
         .translateSelf(-dragState.anchor.x, -dragState.anchor.y);
+    const nextMatrix = dragState.parentMatrix.inverse().multiply(worldTransform).multiply(dragState.currentMatrix);
+    return toTransformMatrix(nextMatrix);
+}
+
+function getRotationTransform(dragState, point) {
+    const angle = Math.atan2(point.y - dragState.center.y, point.x - dragState.center.x);
+    if (!Number.isFinite(angle)) {
+        return null;
+    }
+
+    const deltaDegrees = ((angle - dragState.startAngle) * 180) / Math.PI;
+    if (approximatelyEqual(deltaDegrees, 0)) {
+        return dragState.originalTransform;
+    }
+
+    const worldTransform = new DOMMatrix()
+        .translateSelf(dragState.center.x, dragState.center.y)
+        .rotateSelf(deltaDegrees)
+        .translateSelf(-dragState.center.x, -dragState.center.y);
     const nextMatrix = dragState.parentMatrix.inverse().multiply(worldTransform).multiply(dragState.currentMatrix);
     return toTransformMatrix(nextMatrix);
 }
@@ -869,6 +1029,30 @@ function createTransformDragState(element, startPoint) {
         currentMatrix,
         parentMatrix,
         originalTransform: element.getAttribute('transform') ?? ''
+    };
+}
+
+function partitionSelectionDragTargets(canvas, editorIds, startPoint) {
+    const selectionTransformDrags = editorIds
+        .map((editorId) => {
+            const element = findElementByEditorId(canvas, editorId);
+            if (!element?.hasAttribute('transform')) {
+                return null;
+            }
+
+            const transformDrag = createTransformDragState(element, startPoint);
+            if (!transformDrag) {
+                return null;
+            }
+
+            return { editorId, transformDrag };
+        })
+        .filter(Boolean);
+    const transformedIds = new Set(selectionTransformDrags.map((entry) => entry.editorId));
+
+    return {
+        plainSelectionIds: editorIds.filter((editorId) => !transformedIds.has(editorId)),
+        selectionTransformDrags
     };
 }
 

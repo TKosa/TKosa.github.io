@@ -254,6 +254,41 @@ input[type="color"] {
     gap: 12px;
 }
 
+.property-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.transform-section {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.transform-section-title {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.secondary-button {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.secondary-button:hover {
+    border-color: var(--selection);
+}
+
 .empty-state {
     margin: 0;
     color: var(--muted);
