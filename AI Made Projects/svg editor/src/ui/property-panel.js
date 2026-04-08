@@ -97,8 +97,8 @@ export function createPropertyPanel({ store, refs }) {
             return;
         }
 
-        if (target.dataset.action === 'normalize-position' && typeof store.normalizeSelectedElementPosition === 'function') {
-            store.normalizeSelectedElementPosition('normalize-position', [editorId], editorId);
+        if (target.dataset.action === 'bake-transform' && typeof store.normalizeSelectedElementPosition === 'function') {
+            store.normalizeSelectedElementPosition('bake-transform', [editorId], editorId);
             return;
         }
 
@@ -209,9 +209,9 @@ function createTransformSection(editorId, canNormalizePosition) {
         const flattenButton = document.createElement('button');
         flattenButton.type = 'button';
         flattenButton.className = 'secondary-button';
-        flattenButton.dataset.action = 'normalize-position';
+        flattenButton.dataset.action = 'bake-transform';
         flattenButton.dataset.editorId = editorId;
-        flattenButton.textContent = 'Bake Translation';
+        flattenButton.textContent = 'Bake Transform';
         actions.append(flattenButton);
     }
 

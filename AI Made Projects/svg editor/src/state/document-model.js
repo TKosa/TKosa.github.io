@@ -819,25 +819,30 @@ function normalizeElementPosition(element) {
         return false;
     }
 
-    const linearMatrix = new DOMMatrix([matrix.a, matrix.b, matrix.c, matrix.d, 0, 0]);
-    let inverseLinearMatrix;
+    const decomposition = decomposeTransformMatrix(matrix);
+    if (!decomposition) {
+        return false;
+    }
+
+    const { residualMatrix, scaleX, scaleY } = decomposition;
+    let inverseResidualMatrix;
     try {
-        inverseLinearMatrix = linearMatrix.inverse();
+        inverseResidualMatrix = residualMatrix.inverse();
     } catch (error) {
         void error;
         return false;
     }
 
-    const localDelta = new DOMPoint(matrix.e, matrix.f).matrixTransform(inverseLinearMatrix);
+    const localDelta = new DOMPoint(matrix.e, matrix.f).matrixTransform(inverseResidualMatrix);
     if (!Number.isFinite(localDelta.x) || !Number.isFinite(localDelta.y)) {
         return false;
     }
 
-    if (!applyPositionDelta(element, localDelta.x, localDelta.y)) {
+    if (!bakeGeometryTransform(element, localDelta.x, localDelta.y, scaleX, scaleY)) {
         return false;
     }
 
-    const nextMatrix = new DOMMatrix([matrix.a, matrix.b, matrix.c, matrix.d, 0, 0]);
+    const nextMatrix = residualMatrix;
     const values = [nextMatrix.a, nextMatrix.b, nextMatrix.c, nextMatrix.d, nextMatrix.e, nextMatrix.f]
         .map((value) => (Math.abs(value) < 0.0000001 ? 0 : Number(value.toFixed(6))));
     const isIdentity = values[0] === 1 && values[1] === 0 && values[2] === 0 && values[3] === 1 && values[4] === 0 && values[5] === 0;
@@ -845,26 +850,67 @@ function normalizeElementPosition(element) {
     return true;
 }
 
-function applyPositionDelta(element, deltaX, deltaY) {
+function decomposeTransformMatrix(matrix) {
+    const scaleX = Math.hypot(matrix.a, matrix.b);
+    if (!Number.isFinite(scaleX) || Math.abs(scaleX) < 0.000001) {
+        return null;
+    }
+
+    const determinant = (matrix.a * matrix.d) - (matrix.b * matrix.c);
+    const scaleY = determinant / scaleX;
+    if (!Number.isFinite(scaleY) || Math.abs(scaleY) < 0.000001) {
+        return null;
+    }
+
+    const residualMatrix = new DOMMatrix([
+        matrix.a / scaleX,
+        matrix.b / scaleX,
+        matrix.c / scaleY,
+        matrix.d / scaleY,
+        0,
+        0
+    ]);
+
+    return { residualMatrix, scaleX, scaleY };
+}
+
+function bakeGeometryTransform(element, deltaX, deltaY, scaleX, scaleY) {
     const tag = element.tagName.toLowerCase();
 
     if (tag === 'rect' || tag === 'text' || tag === 'image' || tag === 'use') {
-        bumpAttribute(element, 'x', deltaX);
-        bumpAttribute(element, 'y', deltaY);
+        scaleAndShiftAttribute(element, 'x', scaleX, deltaX);
+        scaleAndShiftAttribute(element, 'y', scaleY, deltaY);
+        if (tag === 'rect' || tag === 'image' || tag === 'use') {
+            scaleAttribute(element, 'width', scaleX);
+            scaleAttribute(element, 'height', scaleY);
+        }
         return true;
     }
 
-    if (tag === 'circle' || tag === 'ellipse') {
-        bumpAttribute(element, 'cx', deltaX);
-        bumpAttribute(element, 'cy', deltaY);
+    if (tag === 'circle') {
+        if (Math.abs(Math.abs(scaleX) - Math.abs(scaleY)) > 0.000001) {
+            return false;
+        }
+
+        scaleAndShiftAttribute(element, 'cx', scaleX, deltaX);
+        scaleAndShiftAttribute(element, 'cy', scaleY, deltaY);
+        scaleAttribute(element, 'r', Math.abs(scaleX));
+        return true;
+    }
+
+    if (tag === 'ellipse') {
+        scaleAndShiftAttribute(element, 'cx', scaleX, deltaX);
+        scaleAndShiftAttribute(element, 'cy', scaleY, deltaY);
+        scaleAttribute(element, 'rx', Math.abs(scaleX));
+        scaleAttribute(element, 'ry', Math.abs(scaleY));
         return true;
     }
 
     if (tag === 'line') {
-        bumpAttribute(element, 'x1', deltaX);
-        bumpAttribute(element, 'x2', deltaX);
-        bumpAttribute(element, 'y1', deltaY);
-        bumpAttribute(element, 'y2', deltaY);
+        scaleAndShiftAttribute(element, 'x1', scaleX, deltaX);
+        scaleAndShiftAttribute(element, 'x2', scaleX, deltaX);
+        scaleAndShiftAttribute(element, 'y1', scaleY, deltaY);
+        scaleAndShiftAttribute(element, 'y2', scaleY, deltaY);
         return true;
     }
 
@@ -875,12 +921,26 @@ function applyPositionDelta(element, deltaX, deltaY) {
         }
 
         element.setAttribute('points', points
-            .map((point) => `${point.x + deltaX},${point.y + deltaY}`)
+            .map((point) => `${roundGeometryValue((point.x * scaleX) + deltaX)},${roundGeometryValue((point.y * scaleY) + deltaY)}`)
             .join(' '));
         return true;
     }
 
     return false;
+}
+
+function scaleAndShiftAttribute(element, name, scale, delta) {
+    const current = Number.parseFloat(element.getAttribute(name) ?? '0');
+    element.setAttribute(name, String(roundGeometryValue((current * scale) + delta)));
+}
+
+function scaleAttribute(element, name, scale) {
+    const current = Number.parseFloat(element.getAttribute(name) ?? '0');
+    element.setAttribute(name, String(roundGeometryValue(current * Math.abs(scale))));
+}
+
+function roundGeometryValue(value) {
+    return Math.abs(value) < 0.0000001 ? 0 : Number(value.toFixed(6));
 }
 
 export function createInitialState() {
