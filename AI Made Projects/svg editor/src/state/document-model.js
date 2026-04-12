@@ -12,6 +12,7 @@ import {
     insertPoint,
     movePoint,
     nudgeElement,
+    parsePointList,
     refreshElementIds,
     removePoint,
     sanitizeClipboardElement,
@@ -62,18 +63,6 @@ export function createStore() {
             name: actionName.trim(),
             args: formatActionArgs(actionArgs)
         };
-    }
-
-    function resolveSelection(selection) {
-        if (Array.isArray(selection)) {
-            return normalizeSelection(selection, state.svgRoot);
-        }
-
-        if (selection instanceof Element) {
-            return normalizeSelection([selection.getAttribute('data-editor-id')], state.svgRoot);
-        }
-
-        return normalizeSelection(selection ? [selection] : [], state.svgRoot);
     }
 
     function createHistoryEntry(snapshotState = state) {
@@ -634,25 +623,6 @@ function measureSelectionBounds(svgRoot, elements) {
     };
 }
 
-function getClipboardAnchor(svgRoot, editorId) {
-    const measuredRoot = cloneSvgRoot(svgRoot);
-    const selected = findElementByEditorId(measuredRoot, editorId);
-    return selected
-        ? getElementBottomRight(measuredRoot, selected) ?? getElementOrigin(selected)
-        : null;
-}
-
-function alignElementTopLeftToAnchor(svgRoot, element, anchor) {
-    const box = measureElementBox(svgRoot, element);
-    if (!box || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
-        return false;
-    }
-
-    const localDelta = toParentLocalDelta(element, anchor.x - box.x, anchor.y - box.y);
-    translateElement(element, localDelta.x, localDelta.y);
-    return true;
-}
-
 function alignElementCenterToAnchor(svgRoot, element, anchor) {
     const box = measureElementBox(svgRoot, element);
     if (!box || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
@@ -664,18 +634,6 @@ function alignElementCenterToAnchor(svgRoot, element, anchor) {
     const localDelta = toParentLocalDelta(element, anchor.x - centerX, anchor.y - centerY);
     translateElement(element, localDelta.x, localDelta.y);
     return true;
-}
-
-function getElementBottomRight(svgRoot, element) {
-    const box = measureElementBox(svgRoot, element);
-    if (!box) {
-        return null;
-    }
-
-    return {
-        x: box.x + box.width,
-        y: box.y + box.height
-    };
 }
 
 function measureElementBox(svgRoot, element) {

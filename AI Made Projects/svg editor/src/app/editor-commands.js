@@ -1,5 +1,5 @@
 import { downloadTextFile } from '../core/utils.js';
-import { getSelectedElementSnapshot, getSelectedElementSnapshots, getSelectedIds } from '../state/document-selectors.js';
+import { getSelectedElementSnapshots, getSelectedIds } from '../state/document-selectors.js';
 
 export function createEditorCommands({ store, status }) {
     const getSelectedElementName = () => {
