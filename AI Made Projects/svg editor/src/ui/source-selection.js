@@ -1,6 +1,6 @@
 import { getElementSourceMarker } from '../svg/serializer.js';
 
-const REVEAL_TOP_PADDING_PX = 100;
+const REVEAL_BOTTOM_PADDING_PX = 0;
 
 export function summarizeElement(element) {
     if (!element) {
@@ -61,6 +61,7 @@ export function renderSourceViewer(viewer, source, focusRange = null, mode = 'pl
 export function revealElementBlock(viewer, source, element) {
     const markerRange = getElementMarkerRange(source, element);
     if (!markerRange) {
+        logSourceMatchMiss('selection-range-not-found', element);
         return false;
     }
 
@@ -71,11 +72,13 @@ export function revealElementBlock(viewer, source, element) {
 export function highlightChangedFields(viewer, source, element, changedFields) {
     const markerRange = getElementMarkerRange(source, element);
     if (!markerRange) {
+        logSourceMatchMiss('highlight-range-not-found', element, { changedFields });
         return false;
     }
 
     const changedRange = findChangedRangeWithinMarker(markerRange.marker, changedFields);
     if (!changedRange) {
+        logSourceMatchMiss('changed-fields-not-found-in-marker', element, { changedFields, markerPreview: markerRange.marker.slice(0, 240) });
         return false;
     }
 
@@ -107,11 +110,13 @@ function normalizeRange(source, range) {
 function getElementMarkerRange(source, element) {
     const marker = getElementSourceMarker(element);
     if (!marker) {
+        logSourceMatchMiss('marker-serialization-empty', element);
         return null;
     }
 
     const normalizedMarker = marker.trim();
     if (!normalizedMarker) {
+        logSourceMatchMiss('marker-trimmed-empty', element);
         return null;
     }
 
@@ -126,26 +131,20 @@ function getElementMarkerRange(source, element) {
 
     const elementId = element.getAttribute('id');
     if (!elementId) {
+        logSourceMatchMiss('exact-match-missed-and-no-id-fallback', element, { markerPreview: normalizedMarker.slice(0, 240) });
         return null;
     }
 
-    const idToken = `id="${elementId}"`;
-    const idIndex = source.indexOf(idToken);
-    if (idIndex === -1) {
-        return null;
-    }
-
-    const lineStart = source.lastIndexOf('<', idIndex);
-    const lineEnd = source.indexOf('\n', idIndex);
-    const end = lineEnd === -1 ? source.length : lineEnd;
-    if (lineStart === -1) {
+    const fallbackRange = findElementRangeById(source, element.tagName.toLowerCase(), elementId);
+    if (!fallbackRange) {
+        logSourceMatchMiss('id-fallback-range-not-found', element, { markerPreview: normalizedMarker.slice(0, 240) });
         return null;
     }
 
     return {
-        start: lineStart,
-        end,
-        marker: source.slice(lineStart, end)
+        start: fallbackRange.start,
+        end: fallbackRange.end,
+        marker: source.slice(fallbackRange.start, fallbackRange.end)
     };
 }
 
@@ -192,8 +191,104 @@ function scrollToFocusedRange(viewer) {
             return;
         }
 
-        const nextScrollTop = Math.max(0, focused.offsetTop - REVEAL_TOP_PADDING_PX);
-        viewer.scrollTop = nextScrollTop;
+        const focusedTop = focused.offsetTop;
+        const focusedBottom = focusedTop + focused.offsetHeight;
+        const visibleTop = viewer.scrollTop;
+        const visibleBottom = visibleTop + viewer.clientHeight;
+
+        if (focusedBottom !== visibleBottom - REVEAL_BOTTOM_PADDING_PX) {
+            viewer.scrollTop = Math.max(0, focusedBottom - viewer.clientHeight + REVEAL_BOTTOM_PADDING_PX);
+        }
+    });
+}
+
+function findElementRangeById(source, tagName, elementId) {
+    const idToken = `id="${elementId}"`;
+    const idIndex = source.indexOf(idToken);
+    if (idIndex === -1) {
+        return null;
+    }
+
+    const start = source.lastIndexOf(`<${tagName}`, idIndex);
+    if (start === -1) {
+        return null;
+    }
+
+    const openEnd = findTagEnd(source, start);
+    if (openEnd === -1) {
+        return null;
+    }
+
+    const openingTag = source.slice(start, openEnd + 1);
+    if (openingTag.endsWith('/>')) {
+        return { start, end: openEnd + 1 };
+    }
+
+    const closeTag = `</${tagName}>`;
+    let depth = 1;
+    let cursor = openEnd + 1;
+
+    while (cursor < source.length) {
+        const nextOpen = source.indexOf(`<${tagName}`, cursor);
+        const nextClose = source.indexOf(closeTag, cursor);
+
+        if (nextClose === -1) {
+            return null;
+        }
+
+        if (nextOpen !== -1 && nextOpen < nextClose) {
+            const nestedOpenEnd = findTagEnd(source, nextOpen);
+            if (nestedOpenEnd === -1) {
+                return null;
+            }
+
+            if (!source.slice(nextOpen, nestedOpenEnd + 1).endsWith('/>')) {
+                depth += 1;
+            }
+            cursor = nestedOpenEnd + 1;
+            continue;
+        }
+
+        depth -= 1;
+        const end = nextClose + closeTag.length;
+        if (depth === 0) {
+            return { start, end };
+        }
+        cursor = end;
+    }
+
+    return null;
+}
+
+function findTagEnd(source, start) {
+    let quote = '';
+
+    for (let index = start; index < source.length; index += 1) {
+        const char = source[index];
+        if ((char === '"' || char === '\'') && (!quote || quote === char)) {
+            quote = quote ? '' : char;
+            continue;
+        }
+
+        if (!quote && char === '>') {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+function logSourceMatchMiss(reason, element, extra = {}) {
+    const tagName = element?.tagName?.toLowerCase?.() ?? 'unknown';
+    const id = element?.getAttribute?.('id') ?? null;
+    const editorId = element?.getAttribute?.('data-editor-id') ?? null;
+
+    console.warn('[svg-editor] Source highlight miss', {
+        reason,
+        tagName,
+        id,
+        editorId,
+        ...extra
     });
 }
 

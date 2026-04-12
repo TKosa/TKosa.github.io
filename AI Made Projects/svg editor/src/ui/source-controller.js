@@ -120,8 +120,12 @@ export function createSourceController({ store, refs, commands }) {
                         } else {
                             lastRenderedSource = nextSource;
                         }
-                    } else {
-                        renderPlainSource(nextSource);
+                    } else if (sourceChanged) {
+                        if (!revealElementBlock(refs.sourceViewer, nextSource, selected)) {
+                            renderPlainSource(nextSource);
+                        } else {
+                            lastRenderedSource = nextSource;
+                        }
                     }
                 } else {
                     renderPlainSource(nextSource);

@@ -1,0 +1,178 @@
+<svg viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="wind-glass" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9" />
+      <stop offset="25%" stop-color="#ccfbf1" stop-opacity="0.7" />
+      <stop offset="60%" stop-color="#5eead4" stop-opacity="0.8" />
+      <stop offset="85%" stop-color="#0f766e" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#042f2e" stop-opacity="1" />
+    </radialGradient>
+    <linearGradient id="wind-stand-silver" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94a3b8" />
+      <stop offset="25%" stop-color="#f1f5f9" />
+      <stop offset="50%" stop-color="#cbd5e1" />
+      <stop offset="75%" stop-color="#f1f5f9" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </linearGradient>
+    <linearGradient id="wind-stand-dark" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="50%" stop-color="#64748b" />
+      <stop offset="100%" stop-color="#334155" />
+    </linearGradient>
+    <filter id="soft-blur">
+      <feGaussianBlur stdDeviation="2" result="blur" />
+    </filter>
+    <filter id="heavy-blur">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+    </filter>
+    <clipPath id="orb-clip">
+      <circle cx="100" cy="100" r="65" />
+    </clipPath>
+    <style>
+      .anim-swirl {
+        transform-origin: 100px 100px;
+        animation: swirl-drift 11s linear infinite;
+      }
+
+      .anim-swirl-rev {
+        transform-origin: 100px 100px;
+        animation: swirl-drift-rev 13s linear infinite;
+      }
+
+      .tornado-base {
+        transform-origin: 50px 58px;
+        animation: tornado-sway 3.8s ease-in-out infinite;
+      }
+
+      .wind-ring {
+        fill: none;
+        stroke-width: 0.9;
+        stroke-linecap: round;
+        opacity: 0.92;
+        transform-origin: 50px 58px;
+        animation: ring-spin 2.1s linear infinite;
+      }
+
+      .tr-1 { animation-duration: 1.15s; }
+      .tr-2 { animation-duration: 1.35s; }
+      .tr-3 { animation-duration: 1.55s; }
+      .tr-4 { animation-duration: 1.75s; }
+      .tr-5 { animation-duration: 1.95s; }
+      .tr-6 { animation-duration: 2.15s; }
+
+      .anim-twinkle-1 {
+        transform-origin: 70px 95px;
+        animation: twinkle 2.2s ease-in-out infinite;
+      }
+
+      .anim-twinkle-2 {
+        transform-origin: 125px 85px;
+        animation: twinkle 2.9s ease-in-out infinite 0.4s;
+      }
+
+      .anim-twinkle-3 {
+        transform-origin: 110px 125px;
+        animation: twinkle 2.5s ease-in-out infinite 0.9s;
+      }
+
+      @keyframes swirl-drift {
+        0% { transform: rotate(0deg) translateX(0px) translateY(0px) scale(1); }
+        50% { transform: rotate(180deg) translateX(2px) translateY(-3px) scale(1.03); }
+        100% { transform: rotate(360deg) translateX(0px) translateY(0px) scale(1); }
+      }
+
+      @keyframes swirl-drift-rev {
+        0% { transform: rotate(0deg) translateX(0px) translateY(0px) scale(1); }
+        50% { transform: rotate(-180deg) translateX(-3px) translateY(2px) scale(0.98); }
+        100% { transform: rotate(-360deg) translateX(0px) translateY(0px) scale(1); }
+      }
+
+      @keyframes tornado-sway {
+        0%, 100% { transform: rotate(-4deg) translateX(-1px) translateY(0px); }
+        50% { transform: rotate(5deg) translateX(2px) translateY(-1px); }
+      }
+
+      @keyframes ring-spin {
+        0% { transform: rotate(0deg) scaleX(1); }
+        50% { transform: rotate(180deg) scaleX(1.06); }
+        100% { transform: rotate(360deg) scaleX(1); }
+      }
+
+      @keyframes twinkle {
+        0%, 100% { opacity: 0.25; transform: scale(0.8); }
+        50% { opacity: 1; transform: scale(1.35); }
+      }
+    </style>
+  </defs>
+
+  <path d="M 50 220 C 50 200 150 200 150 220 L 140 240 C 140 250 60 250 60 240 Z" fill="url(#wind-stand-dark)" />
+  <ellipse cx="100" cy="220" rx="50" ry="10" fill="url(#wind-stand-silver)" />
+  <path d="M 65 190 C 65 180 135 180 135 190 L 125 220 C 125 230 75 230 75 220 Z" fill="url(#wind-stand-dark)" />
+  <ellipse cx="100" cy="190" rx="35" ry="8" fill="url(#wind-stand-silver)" />
+
+  <path d="M 75 190 C 60 160 50 140 60 120 C 65 130 70 140 85 160 Z" fill="url(#wind-stand-silver)" />
+  <path d="M 125 190 C 140 160 150 140 140 120 C 135 130 130 140 115 160 Z" fill="url(#wind-stand-silver)" />
+
+  <circle cx="100" cy="100" r="65" fill="url(#wind-glass)" />
+
+  <g clip-path="url(#orb-clip)">
+    <path class="anim-swirl" d="M 50 100 C 60 60 110 50 130 80 C 150 110 110 150 70 130 Z" fill="#ccfbf1" opacity="0.2" />
+    <path class="anim-swirl-rev" d="M 60 110 C 70 80 120 70 140 100 C 160 130 120 160 80 140 Z" fill="#5eead4" opacity="0.15" />
+
+    <g transform="translate(35, 25) scale(1.3)">
+      <path d="M -20,15 Q 50,30 120,15 L 120,-10 L -20,-10 Z" fill="#374151" filter="url(#heavy-blur)" opacity="0.8" />
+      <path d="M 0,20 Q 50,25 100,20 L 100,-10 L 0,-10 Z" fill="#4b5563" filter="url(#soft-blur)" opacity="0.9" />
+
+      <g class="tornado-base">
+        <path d="M 30,30 Q 50,60 47,90 Q 50,60 70,30 Z" fill="#4b5563" filter="url(#heavy-blur)" opacity="0.9" />
+        <path d="M 35,30 Q 50,55 49,90 Q 50,55 65,30 Z" fill="#6b7280" filter="url(#soft-blur)" opacity="0.8" />
+
+        <ellipse cx="50" cy="32" rx="15" ry="2.7" class="wind-ring tr-4" stroke="#9ca3af" transform="rotate(-4 50 32)" />
+        <ellipse cx="50" cy="34" rx="14.5" ry="2.6" class="wind-ring tr-3" stroke="#4b5563" transform="rotate(10 50 34)" />
+        <ellipse cx="50" cy="35" rx="14" ry="2.5" class="wind-ring tr-1" stroke="#6b7280" transform="rotate(6 50 35)" />
+        <ellipse cx="50" cy="36" rx="13.5" ry="2.3" class="wind-ring tr-5" stroke="#374151" transform="rotate(15 50 36)" />
+        <ellipse cx="50" cy="38" rx="13" ry="2.2" class="wind-ring tr-2" stroke="#4b5563" transform="rotate(-8 50 38)" />
+        <ellipse cx="50" cy="40" rx="12.5" ry="2.1" class="wind-ring tr-6" stroke="#9ca3af" transform="rotate(-12 50 40)" />
+        <ellipse cx="50" cy="41" rx="12.2" ry="2.0" class="wind-ring tr-1" stroke="#1f2937" transform="rotate(8 50 41)" />
+        <ellipse cx="50" cy="43" rx="12" ry="2.0" class="wind-ring tr-3" stroke="#374151" transform="rotate(12 50 43)" />
+        <ellipse cx="50" cy="45" rx="11.5" ry="1.9" class="wind-ring tr-2" stroke="#6b7280" transform="rotate(-3 50 45)" />
+        <ellipse cx="50" cy="46" rx="11.3" ry="1.8" class="wind-ring tr-4" stroke="#4b5563" transform="rotate(18 50 46)" />
+        <ellipse cx="50" cy="48" rx="11" ry="1.8" class="wind-ring tr-4" stroke="#1f2937" transform="rotate(-5 50 48)" />
+        <ellipse cx="50" cy="50" rx="10.5" ry="1.7" class="wind-ring tr-5" stroke="#9ca3af" transform="rotate(-9 50 50)" />
+        <ellipse cx="50" cy="51" rx="10.3" ry="1.6" class="wind-ring tr-1" stroke="#374151" transform="rotate(7 50 51)" />
+        <ellipse cx="50" cy="53" rx="10" ry="1.6" class="wind-ring tr-5" stroke="#4b5563" transform="rotate(9 50 53)" />
+        <ellipse cx="50" cy="55" rx="9.5" ry="1.5" class="wind-ring tr-3" stroke="#1f2937" transform="rotate(-14 50 55)" />
+        <ellipse cx="50" cy="56" rx="9.2" ry="1.5" class="wind-ring tr-6" stroke="#6b7280" transform="rotate(11 50 56)" />
+        <ellipse cx="50" cy="58" rx="8.5" ry="1.5" class="wind-ring tr-6" stroke="#6b7280" transform="rotate(-11 50 58)" />
+        <ellipse cx="50" cy="60" rx="8" ry="1.4" class="wind-ring tr-2" stroke="#4b5563" transform="rotate(4 50 60)" />
+        <ellipse cx="50" cy="62" rx="7.7" ry="1.4" class="wind-ring tr-4" stroke="#374151" transform="rotate(-6 50 62)" />
+        <ellipse cx="50" cy="64" rx="7.5" ry="1.4" class="wind-ring tr-1" stroke="#374151" transform="rotate(14 50 64)" />
+        <ellipse cx="50" cy="67" rx="6.8" ry="1.3" class="wind-ring tr-5" stroke="#9ca3af" transform="rotate(-16 50 67)" />
+        <ellipse cx="50" cy="69" rx="6.5" ry="1.2" class="wind-ring tr-2" stroke="#4b5563" transform="rotate(-7 50 69)" />
+        <ellipse cx="50" cy="72" rx="6" ry="1.1" class="wind-ring tr-1" stroke="#1f2937" transform="rotate(9 50 72)" />
+        <ellipse cx="50" cy="73" rx="5.8" ry="1.1" class="wind-ring tr-6" stroke="#6b7280" transform="rotate(-4 50 73)" />
+        <ellipse cx="50" cy="75" rx="5.5" ry="1.1" class="wind-ring tr-3" stroke="#6b7280" transform="rotate(10 50 75)" />
+        <ellipse cx="50" cy="78" rx="5" ry="1.0" class="wind-ring tr-2" stroke="#4b5563" transform="rotate(-12 50 78)" />
+        <ellipse cx="50" cy="80" rx="4.5" ry="0.9" class="wind-ring tr-4" stroke="#1f2937" transform="rotate(-15 50 80)" />
+        <ellipse cx="50" cy="82" rx="4" ry="0.8" class="wind-ring tr-3" stroke="#9ca3af" transform="rotate(13 50 82)" />
+        <ellipse cx="50" cy="85" rx="3.5" ry="0.8" class="wind-ring tr-5" stroke="#374151" transform="rotate(5 50 85)" />
+        <ellipse cx="50" cy="88" rx="3" ry="0.7" class="wind-ring tr-1" stroke="#6b7280" transform="rotate(-8 50 88)" />
+      </g>
+    </g>
+  </g>
+
+  <g class="anim-twinkle-1">
+    <circle cx="70" cy="95" r="1.2" fill="#ccfbf1" opacity="0.7" />
+  </g>
+  <g class="anim-twinkle-2">
+    <circle cx="125" cy="85" r="1.5" fill="#ffffff" opacity="0.6" />
+  </g>
+  <g class="anim-twinkle-3">
+    <circle cx="110" cy="125" r="1" fill="#5eead4" opacity="0.8" />
+  </g>
+
+  <path d="M 55 70 A 55 55 0 0 1 110 40 A 45 45 0 0 0 70 85 Z" fill="#ffffff" opacity="0.8" />
+  <path d="M 130 150 A 55 55 0 0 1 80 160 A 45 45 0 0 0 140 140 Z" fill="#ffffff" opacity="0.4" />
+
+  <path d="M 100 190 C 95 160 90 140 100 115 C 105 140 105 160 100 190 Z" fill="url(#wind-stand-silver)" />
+</svg>
