@@ -3,10 +3,12 @@ import { clearSourceSelection, getChangedFields, highlightChangedFields, renderS
 
 const SOURCE_UPDATE_DEBOUNCE_MS = 350;
 const SELECTION_REVEAL_MS = 250;
+const MODE_SCROLL_SYNC_MS = 60;
 
 export function createSourceController({ store, refs, commands }) {
     let pushTimer = null;
     let revealTimer = null;
+    let modeSyncTimer = null;
     let isEditingSource = false;
     let lastSelectionKey = '';
     let lastSelectedSummary = null;
@@ -38,25 +40,50 @@ export function createSourceController({ store, refs, commands }) {
         refs.sourceModeToggle.textContent = isEditingSource ? 'Apply Source' : 'Edit Source';
     };
 
+    const getScrollState = (element) => ({
+        top: element.scrollTop,
+        left: element.scrollLeft
+    });
+
+    const applyScrollState = (element, scrollState) => {
+        element.scrollTop = scrollState.top;
+        element.scrollLeft = scrollState.left;
+    };
+
+    const scheduleModeScrollSync = (element, scrollState) => {
+        clearTimeout(modeSyncTimer);
+        modeSyncTimer = window.setTimeout(() => {
+            applyScrollState(element, scrollState);
+        }, MODE_SCROLL_SYNC_MS);
+    };
+
     const enterEditMode = () => {
         clearTimeout(pushTimer);
         clearTimeout(revealTimer);
+        const viewerScrollState = getScrollState(refs.sourceViewer);
         isEditingSource = true;
         refs.sourceInput.value = store.serialize();
         syncModeUi();
+        scheduleModeScrollSync(refs.sourceInput, viewerScrollState);
         refs.sourceInput.focus({ preventScroll: true });
     };
 
     const exitEditMode = () => {
+        const inputScrollState = getScrollState(refs.sourceInput);
+        const selectedIds = getSelectedIds(store.getState());
         isEditingSource = false;
         syncModeUi();
 
         try {
             commands.updateSourceDocument(refs.sourceInput.value);
+            if (selectedIds.length !== 1) {
+                scheduleModeScrollSync(refs.sourceViewer, inputScrollState);
+            }
         } catch (error) {
             isEditingSource = true;
             syncModeUi();
             window.alert(error instanceof Error ? error.message : 'Unable to apply SVG source.');
+            scheduleModeScrollSync(refs.sourceInput, inputScrollState);
             refs.sourceInput.focus({ preventScroll: true });
         }
     };
