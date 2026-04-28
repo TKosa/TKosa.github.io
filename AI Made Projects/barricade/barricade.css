@@ -55,6 +55,10 @@ body {
   border: 1px solid var(--border);
 }
 
+#board-shell.reflected {
+  transform: rotate(180deg);
+}
+
 #board-and-moves {
   display: flex;
   align-items: stretch;

@@ -1,0 +1,33 @@
+{
+  "trainedAt": "2026-04-28T15:52:18.617Z",
+  "final": true,
+  "minutesRequested": 5,
+  "evalCount": 2,
+  "gamesPlayed": 48,
+  "bestScore": 0.5416666666666666,
+  "bestWeights": {
+    "dist": 129,
+    "walls": 15,
+    "mobility": 8
+  },
+  "seedWeights": {
+    "dist": 120,
+    "walls": 10,
+    "mobility": 6
+  },
+  "bounds": {
+    "dist": [
+      50,
+      220
+    ],
+    "walls": [
+      0,
+      35
+    ],
+    "mobility": [
+      0,
+      22
+    ]
+  },
+  "gamesPerCandidate": 24
+}

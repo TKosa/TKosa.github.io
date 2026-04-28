@@ -1,6 +1,5 @@
 export class Barricade {
   constructor() {
-    this.debugPathValidation = true;
     this.reset();
   }
 
@@ -177,6 +176,49 @@ export class Barricade {
     return { hasPath: false, expandedNodes };
   }
 
+  getShortestPath(player) {
+    const start = this.positions[player];
+    const startKey = `${start.row},${start.col}`;
+    const queue = [start];
+    const seen = new Set([startKey]);
+    const prev = new Map();
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (this.isAtGoal(player, current)) {
+        const path = [];
+        let key = `${current.row},${current.col}`;
+        while (key) {
+          const [row, col] = key.split(",").map(Number);
+          path.push({ row, col });
+          key = prev.get(key);
+        }
+        return path.reverse();
+      }
+      for (const next of this.getAdjacentSquares(current.row, current.col)) {
+        if (this.isBlocked(current.row, current.col, next.row, next.col)) {
+          continue;
+        }
+        const key = `${next.row},${next.col}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        prev.set(key, `${current.row},${current.col}`);
+        queue.push(next);
+      }
+    }
+    return [];
+  }
+
+  getShortestDistance(player) {
+    const path = this.getShortestPath(player);
+    if (path.length === 0) {
+      return 999;
+    }
+    return path.length - 1;
+  }
+
   canPlayerReachGoalDFS(player) {
     const start = this.positions[player];
     const stack = [start];
@@ -334,15 +376,6 @@ export class Barricade {
 
     for (const [from, to] of segments) {
       this.setBlocked(from.row, from.col, to.row, to.col, false);
-    }
-
-    if (this.debugPathValidation) {
-      const workSummary = validation
-        .map((r) => `${r.player}: path=${r.hasPath ? "yes" : "no"}, expanded=${r.expandedNodes}`)
-        .join(" | ");
-      console.log(
-        `[PathValidation] wall ${orientation}@(${row},${col}) by ${player} => ${allHavePath ? "valid" : "invalid"}; totalExpanded=${totalExpanded}; ${workSummary}`
-      );
     }
 
     return allHavePath;

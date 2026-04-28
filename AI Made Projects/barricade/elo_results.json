@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-04-28T19:38:33.538Z",
+  "games": 30,
+  "kFactor": 32,
+  "speedProfile": {
+    "ai1": {
+      "maxDepth": 1,
+      "timeBudgetMs": 35,
+      "wallSampleLimit": 8
+    },
+    "ai2": {
+      "maxDepth": 2,
+      "timeBudgetMs": 55,
+      "wallSampleLimit": 10
+    },
+    "ai3": {
+      "maxDepth": 2,
+      "timeBudgetMs": 80,
+      "wallSampleLimit": 14
+    },
+    "ai4": {
+      "maxDepth": 99,
+      "timeBudgetMs": 1500,
+      "wallSampleLimit": 24
+    },
+    "ai5": {
+      "maxDepth": 99,
+      "timeBudgetMs": 1500,
+      "wallSampleLimit": 24
+    },
+    "ai6": {
+      "maxDepth": 99,
+      "timeBudgetMs": 1500,
+      "wallSampleLimit": 28
+    }
+  },
+  "hardPlusWeights": {
+    "dist": 129,
+    "walls": 15,
+    "mobility": 8
+  },
+  "ratings": [
+    {
+      "name": "ai6",
+      "elo": 1029.4
+    },
+    {
+      "name": "ai5",
+      "elo": 970.6
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { Barricade } from "./Barricade.js";
+import { createAiBot } from "./AI/index.js";
 import { peerManager } from "./PeerManager.js";
 import { eventHub } from "./EventHub.js";
 
@@ -31,8 +32,10 @@ export class Game {
     };
     this.startTimeInput = document.getElementById("start-time");
     this.incrementInput = document.getElementById("increment");
+    this.aiLevelSelect = document.getElementById("ai-level");
     this.startButton = document.getElementById("start-button");
     this.restartButton = document.getElementById("restart-button");
+    this.reflectButton = document.getElementById("reflect-button");
     this.backButton = document.getElementById("back-button");
     this.forwardButton = document.getElementById("forward-button");
     this.movesListElement = document.getElementById("moves-list");
@@ -48,12 +51,20 @@ export class Game {
     this.playerOrder = ["red", "blue"];
     this.colorAssignments = {};
     this.stateVersion = 0;
+    this.isReflected = false;
+    this.aiBot = createAiBot("ai2");
+    this.aiThinking = false;
+    this.hardPlusWeights = { dist: 129, walls: 7, mobility: 7 };
+    this.hardPlusValueModel = null;
+    this.hardPlusPolicyModel = null;
 
     this.startButton.addEventListener("click", () => this.startGame(true));
     this.restartButton.addEventListener("click", () => this.restartBoard());
+    this.reflectButton.addEventListener("click", () => this.toggleReflection());
     this.backButton.addEventListener("click", () => this.goBackOneMove());
     this.forwardButton.addEventListener("click", () => this.goForwardOneMove());
     this.modeSelect.addEventListener("change", () => this.onModeChanged());
+    this.aiLevelSelect.addEventListener("change", () => this.onAiLevelChanged());
     document.addEventListener("keydown", (event) => this.onKeyDown(event));
 
     eventHub.on("start-game", (data) => {
@@ -75,6 +86,7 @@ export class Game {
     eventHub.on("participants-updated", ({ count, isHost }) => {
       const networked = (count || 0) > 1;
       this.modeSelect.disabled = networked && !isHost;
+      this.aiLevelSelect.disabled = networked;
     });
     eventHub.on("barricade-action", (data) => {
       if (!data || !data.action) {
@@ -108,6 +120,9 @@ export class Game {
     this.updateBoard();
     this.updateStatus();
     this.renderMoves();
+    this.loadHardPlusWeights();
+    this.loadHardPlusValueModel();
+    this.loadHardPlusPolicyModel();
   }
 
   initializeBoard() {
@@ -185,9 +200,88 @@ export class Game {
 
   canLocalPlayerAct() {
     if (!this.isNetworkedGame) {
-      return true;
+      if (this.isAiEnabled() && this.game.future.length > 0) {
+        return true;
+      }
+      return !this.isAiTurn();
     }
     return this.localPlayerColor === this.game.getCurrentPlayer();
+  }
+
+  onAiLevelChanged() {
+    this.aiBot = createAiBot(this.aiLevelSelect.value, {
+      hardPlusWeights: this.hardPlusWeights,
+      hardPlusValueModel: this.hardPlusValueModel,
+      hardPlusPolicyModel: this.hardPlusPolicyModel,
+      defaultWeights: { dist: 120, walls: 10, mobility: 6 },
+    });
+    this.maybeRunAiTurn();
+  }
+
+  async loadHardPlusWeights() {
+    try {
+      const response = await fetch("./bot-weights.json", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (data && data.bestWeights) {
+        this.hardPlusWeights = {
+          dist: Number(data.bestWeights.dist) || this.hardPlusWeights.dist,
+          walls: Number(data.bestWeights.walls) || this.hardPlusWeights.walls,
+          mobility: Number(data.bestWeights.mobility) || this.hardPlusWeights.mobility,
+        };
+        if (this.aiLevelSelect.value === "ai4") {
+          this.aiBot.setWeights(this.hardPlusWeights);
+        }
+      }
+    } catch (error) {
+      // Keep default fallback weights for hardplus.
+    }
+  }
+
+  async loadHardPlusValueModel() {
+    try {
+      const response = await fetch("./value-net.json", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (data && data.w1 && data.b1 && data.w2 && data.b2) {
+        this.hardPlusValueModel = data;
+        if (this.aiLevelSelect.value === "ai4") {
+          this.aiBot.setValueModel(this.hardPlusValueModel);
+        }
+      }
+    } catch (error) {
+      // keep null model fallback
+    }
+  }
+
+  async loadHardPlusPolicyModel() {
+    try {
+      const response = await fetch("./policy-net.json", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (data && data.w1 && data.b1 && data.w2 && data.b2) {
+        this.hardPlusPolicyModel = data;
+        if (this.aiLevelSelect.value === "ai4") {
+          this.aiBot.setPolicyModel(this.hardPlusPolicyModel);
+        }
+      }
+    } catch (error) {
+      // keep null policy model fallback
+    }
+  }
+
+  isAiEnabled() {
+    return !this.isNetworkedGame && this.game.mode === "1v1" && this.aiLevelSelect.value !== "off";
+  }
+
+  isAiTurn() {
+    return this.isAiEnabled() && this.game.status === "In progress" && this.game.getCurrentPlayer() === "blue";
   }
 
   onSquareClick(row, col) {
@@ -284,7 +378,8 @@ export class Game {
 
   makeLocalAction(action) {
     const wasViewingPast = this.game.future.length > 0;
-    if (wasViewingPast) {
+    const canBranchFromPast = !this.isNetworkedGame && this.isAiEnabled() && wasViewingPast;
+    if (wasViewingPast && !canBranchFromPast) {
       this.fastForwardToCurrent(false);
     }
     const ok = this.game.executeActionAndUpdateState(action);
@@ -314,6 +409,7 @@ export class Game {
     this.renderMoves();
     this.stateVersion += 1;
     this.persistRoomState();
+    this.maybeRunAiTurn();
   }
 
   formatPlayerName(player) {
@@ -325,11 +421,16 @@ export class Game {
       this.statusElement.textContent = this.game.status;
       return;
     }
+    if (this.isAiTurn()) {
+      this.statusElement.textContent = "AI thinking...";
+      return;
+    }
     const player = this.game.getCurrentPlayer();
     this.statusElement.textContent = `${this.formatPlayerName(player)}'s turn`;
   }
 
   updateBoard() {
+    this.boardElement.parentElement.classList.toggle("reflected", this.isReflected);
     const nodes = this.boardElement.querySelectorAll("div");
     nodes.forEach((node) => {
       node.classList.remove(
@@ -399,6 +500,11 @@ export class Game {
 
     this.updateWallCounts();
     this.updateTimerVisibility();
+  }
+
+  toggleReflection() {
+    this.isReflected = !this.isReflected;
+    this.updateBoard();
   }
 
   getHighlightedGoalTiles() {
@@ -500,6 +606,7 @@ export class Game {
     this.game.reset(this.modeSelect.value);
     this.initializeBoard();
     this.isNetworkedGame = peerManager.getParticipantCount() > 1;
+    this.aiLevelSelect.disabled = this.isNetworkedGame;
     if (!this.isNetworkedGame) {
       this.localPlayerColor = null;
       this.isHost = false;
@@ -519,11 +626,13 @@ export class Game {
     this.activeTimer = null;
     this.stateVersion += 1;
     this.persistRoomState();
+    this.maybeRunAiTurn();
   }
 
   onModeChanged() {
     const networkPlayers = peerManager.getParticipantCount();
     const networked = networkPlayers > 1;
+    this.aiLevelSelect.disabled = networked;
     if (networked && !peerManager.isHost) {
       this.modeSelect.value = this.game.mode;
       this.statusElement.textContent = "Only host can change game mode in networked game";
@@ -544,6 +653,7 @@ export class Game {
     this.renderMoves();
     this.stateVersion += 1;
     this.persistRoomState();
+    this.maybeRunAiTurn();
   }
 
   restartBoard() {
@@ -575,6 +685,7 @@ export class Game {
     this.renderMoves();
     this.stateVersion += 1;
     this.persistRoomState();
+    this.maybeRunAiTurn();
 
     if (networked && originalMode !== targetMode) {
       peerManager.broadcast({ type: "state-sync", state: this.getSerializableState() });
@@ -590,6 +701,7 @@ export class Game {
     this.isNetworkedGame = networkPlayers > 1;
     this.isHost = this.isNetworkedGame ? peerManager.isHost : false;
     this.modeSelect.disabled = this.isNetworkedGame && !this.isHost;
+    this.aiLevelSelect.disabled = this.isNetworkedGame;
 
     if (this.isNetworkedGame && isHostStartTrigger && !this.isHost) {
       this.statusElement.textContent = "Only host can start networked game";
@@ -639,6 +751,7 @@ export class Game {
     this.startTimers();
     this.stateVersion += 1;
     this.persistRoomState();
+    this.maybeRunAiTurn();
 
     if (this.isNetworkedGame && !this.networkListenersAdded) {
       this.broadcastAction = (action) => {
@@ -696,6 +809,7 @@ export class Game {
     };
     this.isNetworkedGame = Boolean(state.isNetworkedGame);
     this.isHost = this.isNetworkedGame ? peerManager.isHost : false;
+    this.aiLevelSelect.disabled = this.isNetworkedGame;
     this.stateVersion = state.stateVersion || 0;
     this.timerElements.red.textContent = this.formatTime(this.timeMs.red);
     this.timerElements.blue.textContent = this.formatTime(this.timeMs.blue);
@@ -705,6 +819,7 @@ export class Game {
     this.updateBoard();
     this.updateStatus();
     this.renderMoves();
+    this.maybeRunAiTurn();
   }
 
   persistRoomState() {
@@ -817,6 +932,24 @@ export class Game {
       event.preventDefault();
       this.goForwardOneMove();
     }
+  }
+
+  maybeRunAiTurn() {
+    if (!this.isAiTurn() || this.aiThinking) {
+      return;
+    }
+    this.aiThinking = true;
+    this.updateStatus();
+    setTimeout(() => {
+      const action = this.aiBot.chooseAction(this.game, "blue");
+      this.aiThinking = false;
+      if (!action || !this.isAiTurn()) {
+        this.updateStatus();
+        return;
+      }
+      this.makeLocalAction(action);
+      this.afterAction();
+    }, 40);
   }
 
   formatMove(action) {
