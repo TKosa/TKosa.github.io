@@ -32,8 +32,10 @@ export class Game {
     this.startTimeInput = document.getElementById("start-time");
     this.incrementInput = document.getElementById("increment");
     this.startButton = document.getElementById("start-button");
+    this.restartButton = document.getElementById("restart-button");
     this.backButton = document.getElementById("back-button");
     this.forwardButton = document.getElementById("forward-button");
+    this.movesListElement = document.getElementById("moves-list");
 
     this.increment = 0;
     this.timeMs = { red: 0, blue: 0, green: 0, yellow: 0 };
@@ -48,9 +50,11 @@ export class Game {
     this.stateVersion = 0;
 
     this.startButton.addEventListener("click", () => this.startGame(true));
+    this.restartButton.addEventListener("click", () => this.restartBoard());
     this.backButton.addEventListener("click", () => this.goBackOneMove());
     this.forwardButton.addEventListener("click", () => this.goForwardOneMove());
     this.modeSelect.addEventListener("change", () => this.onModeChanged());
+    document.addEventListener("keydown", (event) => this.onKeyDown(event));
 
     eventHub.on("start-game", (data) => {
       this.modeSelect.value = data.mode || "1v1";
@@ -103,6 +107,7 @@ export class Game {
     this.initializeBoard();
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
   }
 
   initializeBoard() {
@@ -278,6 +283,10 @@ export class Game {
   }
 
   makeLocalAction(action) {
+    const wasViewingPast = this.game.future.length > 0;
+    if (wasViewingPast) {
+      this.fastForwardToCurrent(false);
+    }
     const ok = this.game.executeActionAndUpdateState(action);
     if (ok) {
       eventHub.emit("my-action", action);
@@ -286,6 +295,10 @@ export class Game {
   }
 
   handleRemoteAction(action) {
+    const wasViewingPast = this.game.future.length > 0;
+    if (wasViewingPast) {
+      this.fastForwardToCurrent(false);
+    }
     const ok = this.game.executeActionAndUpdateState(action);
     if (!ok) {
       return;
@@ -298,6 +311,7 @@ export class Game {
     this.updateStatus();
     this.updateTimers();
     this.updateBoard();
+    this.renderMoves();
     this.stateVersion += 1;
     this.persistRoomState();
   }
@@ -497,6 +511,7 @@ export class Game {
     this.hoverSquare = null;
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
     if (this.activeTimer) {
       this.initiateTimers(this.startTimeInput.value, this.incrementInput.value);
     }
@@ -526,8 +541,44 @@ export class Game {
     this.initializeBoard();
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
     this.stateVersion += 1;
     this.persistRoomState();
+  }
+
+  restartBoard() {
+    const networkPlayers = peerManager.getParticipantCount();
+    const networked = networkPlayers > 1;
+    if (networked && !peerManager.isHost) {
+      this.statusElement.textContent = "Only host can restart in networked game";
+      return;
+    }
+
+    const originalMode = this.modeSelect.value;
+    const targetMode = "1v1";
+    this.modeSelect.value = "4p";
+    this.game.reset("4p");
+    this.modeSelect.value = targetMode;
+    this.game.reset(targetMode);
+    this.playerOrder = MODE_PLAYERS[targetMode];
+    this.modeSelect.value = targetMode;
+    clearTimeout(this.hoverSquareTimer);
+    clearTimeout(this.hoverWallTimer);
+    clearInterval(this.activeTimer);
+    this.activeTimer = null;
+    this.pendingRedirectChoices = null;
+    this.hoverWall = null;
+    this.hoverSquare = null;
+    this.initializeBoard();
+    this.updateBoard();
+    this.updateStatus();
+    this.renderMoves();
+    this.stateVersion += 1;
+    this.persistRoomState();
+
+    if (networked && originalMode !== targetMode) {
+      peerManager.broadcast({ type: "state-sync", state: this.getSerializableState() });
+    }
   }
 
   getExpectedPlayerCount() {
@@ -584,6 +635,7 @@ export class Game {
     this.hoverSquare = null;
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
     this.startTimers();
     this.stateVersion += 1;
     this.persistRoomState();
@@ -652,6 +704,7 @@ export class Game {
     this.initializeBoard();
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
   }
 
   persistRoomState() {
@@ -728,6 +781,7 @@ export class Game {
     this.hoverSquare = null;
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
   }
 
   goForwardOneMove() {
@@ -739,6 +793,87 @@ export class Game {
     this.hoverSquare = null;
     this.updateBoard();
     this.updateStatus();
+    this.renderMoves();
+  }
+
+  fastForwardToCurrent(refresh = true) {
+    while (this.game.future.length > 0) {
+      this.game.goForwardOneMove();
+    }
+    if (refresh) {
+      this.updateBoard();
+      this.updateStatus();
+      this.renderMoves();
+    }
+  }
+
+  onKeyDown(event) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      this.goBackOneMove();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      this.goForwardOneMove();
+    }
+  }
+
+  formatMove(action) {
+    if (!action) {
+      return "";
+    }
+    if (action.type === "move" && action.to) {
+      const file = String.fromCharCode("a".charCodeAt(0) + action.to.col);
+      const rank = (this.game.size - action.to.row).toString();
+      return `${file}${rank}`;
+    }
+    if (action.type === "wall") {
+      const anchorRow = action.row + 1;
+      const anchorCol = action.col;
+      const file = String.fromCharCode("a".charCodeAt(0) + anchorCol);
+      const rank = (this.game.size - anchorRow).toString();
+      const orientation = action.orientation === "h" ? "h" : "v";
+      return `${file}${rank}${orientation}`;
+    }
+    return action.type || "";
+  }
+
+  renderMoves() {
+    if (!this.movesListElement) {
+      return;
+    }
+    const actions = this.game.moveLog || [];
+    const currentPly = actions.length - this.game.future.length;
+    const rows = Math.ceil(actions.length / 2);
+    this.movesListElement.innerHTML = "";
+
+    for (let row = 0; row < rows; row++) {
+      const rowElement = document.createElement("div");
+      rowElement.className = "move-row";
+      for (let col = 0; col < 2; col++) {
+        const ply = row * 2 + col;
+        const cell = document.createElement("div");
+        cell.className = "move-cell";
+        if (ply < actions.length) {
+          const movePlayer = this.game.players[ply % this.game.players.length];
+          cell.classList.add(`move-cell-${movePlayer}`);
+          cell.textContent = this.formatMove(actions[ply]);
+          if (ply === currentPly - 1) {
+            cell.classList.add("active");
+          }
+        }
+        rowElement.appendChild(cell);
+      }
+      this.movesListElement.appendChild(rowElement);
+    }
+
+    const activeCell = this.movesListElement.querySelector(".move-cell.active");
+    if (activeCell) {
+      activeCell.scrollIntoView({ block: "nearest" });
+    } else {
+      this.movesListElement.scrollTop = this.movesListElement.scrollHeight;
+    }
   }
 }
 

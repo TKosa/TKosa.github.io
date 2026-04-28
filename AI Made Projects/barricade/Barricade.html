@@ -40,16 +40,27 @@
             <input type="number" id="start-time" placeholder="Start time (minutes)" min="1">
             <input type="number" id="increment" placeholder="Increment (seconds)" min="0">
             <button id="start-button">Start Game</button>
+            <button id="restart-button">Restart</button>
           </div>
         </div>
 
-        <div id="board-shell">
-          <div id="barricadeboard"></div>
-          <div id="right-labels">
-            <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+        <div id="board-and-moves">
+          <div id="board-shell">
+            <div id="barricadeboard"></div>
+            <div id="right-labels">
+              <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div id="bottom-labels">
+              <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
+            </div>
           </div>
-          <div id="bottom-labels">
-            <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
+          <div id="moves-panel">
+            <div id="moves-header">Moves</div>
+            <div id="moves-list" aria-live="polite"></div>
+            <div id="controls">
+              <button id="back-button">Back</button>
+              <button id="forward-button">Forward</button>
+            </div>
           </div>
         </div>
         <div id="walls">
@@ -59,10 +70,6 @@
           <span id="yellow-walls-sep"> | </span><span id="yellow-walls-wrap">Yellow walls: <span id="yellow-walls">10</span></span>
         </div>
         <div id="status"></div>
-        <div id="controls">
-          <button id="back-button">Back</button>
-          <button id="forward-button">Forward</button>
-        </div>
       </div>
 
       <div id="chat-container">

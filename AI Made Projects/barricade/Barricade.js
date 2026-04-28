@@ -9,6 +9,7 @@ export class Barricade {
     this.mode = mode;
     this.status = "Not started";
     this.moveIndex = 0;
+    this.moveLog = [];
     this.history = [];
     this.future = [];
     this.blockedEdges = new Set();
@@ -382,6 +383,7 @@ export class Barricade {
     }
     this.history.push(snapshot);
     this.future = [];
+    this.moveLog.push(JSON.parse(JSON.stringify(action)));
     this.updateStatusAfterAction();
     if (this.status === "In progress") {
       this.moveIndex += 1;
@@ -412,6 +414,7 @@ export class Barricade {
       blockedEdges: [...this.blockedEdges],
       edgeOwners: [...this.edgeOwners.entries()],
       placedWalls: [...this.placedWalls],
+      moveLog: JSON.parse(JSON.stringify(this.moveLog || [])),
     };
   }
 
@@ -426,6 +429,7 @@ export class Barricade {
     this.blockedEdges = new Set(snapshot.blockedEdges);
     this.edgeOwners = new Map(snapshot.edgeOwners || []);
     this.placedWalls = new Set(snapshot.placedWalls || []);
+    this.moveLog = JSON.parse(JSON.stringify(snapshot.moveLog || []));
   }
 
   goBackOneMove() {
