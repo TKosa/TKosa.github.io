@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barricade Online</title>
+  <link rel="stylesheet" href="barricade.css">
+  <link rel="stylesheet" href="chat.css">
+  <script type="module" src="EventHub.js"></script>
+  <script type="module" src="PeerManager.js"></script>
+  <script type="module" src="Game.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <div class="connection-panel">
+      <h2>Connection</h2>
+      <div class="input-group">
+        <input type="text" id="connection-key" placeholder="Enter a shared key">
+        <input type="text" id="nickname-field" placeholder="Nickname (Optional)">
+        <button id="connect-btn">Connect</button>
+      </div>
+      <button id="leave-btn" type="button">Leave Room</button>
+      <div id="connection-status">Disconnected from signaling server</div>
+    </div>
+
+    <div id="game-container">
+      <div id="game">
+        <div id="game-controls">
+          <div id="timers">
+            <div id="red-timer" class="timer">00:00</div>
+            <div id="blue-timer" class="timer">00:00</div>
+            <div id="green-timer" class="timer">00:00</div>
+            <div id="yellow-timer" class="timer">00:00</div>
+          </div>
+          <div id="game-inputs">
+            <select id="game-mode">
+              <option value="1v1">1v1</option>
+              <option value="4p">4 Player</option>
+            </select>
+            <input type="number" id="start-time" placeholder="Start time (minutes)" min="1">
+            <input type="number" id="increment" placeholder="Increment (seconds)" min="0">
+            <button id="start-button">Start Game</button>
+          </div>
+        </div>
+
+        <div id="board-shell">
+          <div id="barricadeboard"></div>
+          <div id="right-labels">
+            <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+          </div>
+          <div id="bottom-labels">
+            <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
+          </div>
+        </div>
+        <div id="walls">
+          <span id="red-walls-wrap">Red walls: <span id="red-walls">10</span></span> |
+          <span id="blue-walls-wrap">Blue walls: <span id="blue-walls">10</span></span>
+          <span id="green-walls-sep"> | </span><span id="green-walls-wrap">Green walls: <span id="green-walls">10</span></span>
+          <span id="yellow-walls-sep"> | </span><span id="yellow-walls-wrap">Yellow walls: <span id="yellow-walls">10</span></span>
+        </div>
+        <div id="status"></div>
+        <div id="controls">
+          <button id="back-button">Back</button>
+          <button id="forward-button">Forward</button>
+        </div>
+      </div>
+
+      <div id="chat-container">
+        <div id="chat-messages"></div>
+        <div id="chat-input">
+          <input type="text" id="message-input" placeholder="Type your message...">
+          <button id="send-button">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
