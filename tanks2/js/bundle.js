@@ -1,4 +1,10 @@
 (() => {
+  var __defProp = Object.defineProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+
   // js/event_hub.js
   var EventHub = class {
     constructor() {
@@ -18,7 +24,10 @@
       handlers.forEach((handler) => {
         try {
           handler.apply(null, rest);
-        } catch (_) {
+        } catch (err) {
+          if (typeof console !== "undefined" && console && console.error) {
+            console.error("EventHub handler error for event", event, err);
+          }
         }
       });
     }
@@ -28,6 +37,17 @@
   // js/render/context.js
   var canvas = document.getElementById("myCanvas");
   var ctx = canvas.getContext("2d");
+  var TEST_BUTTON_FLAG_KEY = "debug";
+  function isTestButtonEnabled() {
+    try {
+      if (typeof localStorage === "undefined") {
+        return false;
+      }
+      return localStorage.getItem(TEST_BUTTON_FLAG_KEY) != null;
+    } catch (_) {
+      return false;
+    }
+  }
   ctx.imageSmoothingEnabled = false;
   ctx.mozImageSmoothingEnabled = false;
   ctx.webkitImageSmoothingEnabled = false;
@@ -72,7 +92,7 @@
     }, true);
     document.addEventListener("click", function(ev) {
       const btn = ev.target && ev.target.closest ? ev.target.closest(".sb-test") : null;
-      if (!btn) return;
+      if (!btn || !isTestButtonEnabled()) return;
       ev.stopPropagation();
       ev.preventDefault();
       try {
@@ -85,24 +105,7 @@
     _hudHandlersBound = true;
   }
 
-  function nowMs() {
-    if (typeof performance !== "undefined" && typeof performance.now === "function") {
-      return performance.now();
-    }
-    return Date.now();
-  }
-
-  function lerpNumber(start, end, alpha) {
-    if (typeof start !== "number" || typeof end !== "number") {
-      return typeof end === "number" ? end : start;
-    }
-    return start + (end - start) * alpha;
-  }
-
-  // js/maze/Powerup.js
-  function isValidImage(el) {
-    return !!(el && el.tagName === "IMG" && el.complete && el.naturalWidth > 0);
-  }
+  // js/maze/powerups/BasePowerup.js
   var Powerup = class {
     constructor(maze, x = 0, y = 0) {
       this.x = x;
@@ -122,91 +125,116 @@
       return this.name;
     }
     draw() {
-      if (isValidImage(this.img)) {
-        var prev = ctx.imageSmoothingEnabled;
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
-        ctx.imageSmoothingEnabled = prev;
-        return;
-      }
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = this.color;
-      ctx.strokeRect(this.x, this.y, this.width, this.width);
+      var prev = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+      ctx.imageSmoothingEnabled = prev;
     }
     onBulletHit(tank) {
       this.pickup(tank);
     }
-    // Unified pickup entrypoint used both by local game loop and networking
-    // Accepts a Tank instance or a tankId string; resolves via maze.tanks when needed
     pickup(target) {
-      if (!this.maze) {
-        return false;
-      }
-      var tank = null;
-      if (typeof target === "string") {
-        var id = target;
-        if (Array.isArray(this.maze.tanks)) {
-          for (var i = 0; i < this.maze.tanks.length; i++) {
-            if (this.maze.tanks[i] && this.maze.tanks[i].id === id) {
-              tank = this.maze.tanks[i];
-              break;
-            }
-          }
-        }
-      } else {
-        tank = target;
-      }
-      if (!tank) {
-        return false;
-      }
-      if (this._handled) {
+      var tank = this.resolveTarget(target);
+      if (!tank || this._handled) {
         return false;
       }
       this._handled = true;
-      try {
-        this.maze.removePowerup(this);
-      } catch (_) {
-      }
-      this.tank = tank;
-      try {
-        tank.removeAllPowerups();
-      } catch (_) {
-      }
-      try {
-        tank.addPowerup(this);
-      } catch (_) {
-      }
-      try {
-        this.timeout = setTimeout(this.teardown.bind(this), this.maze.settings.powerup_duration * 1e3);
-      } catch (_) {
-      }
-      try {
-        this.notifyActivate(tank);
-      } catch (_) {
-      }
-      try {
-        if (this.maze.drawScoreboardTop) {
-          this.maze.drawScoreboardTop();
-        }
-      } catch (_) {
-      }
+      this.removeFromBoard();
+      this.attachToTank(tank);
+      this.startDurationTimer();
+      this.notifyActivate(tank);
+      this.refreshScoreboard();
       return true;
     }
-    // Teardown: undo effect via tank.removePowerup (which calls undo), notify, and repaint scoreboard
-    teardown() {
-      try {
-        if (this.timeout) {
-          clearTimeout(this.timeout);
-          this.timeout = null;
-        }
-        if (this.tank) {
-          this.tank.removePowerup(this);
-        }
-        if (this.maze && this.maze.drawScoreboardTop) {
-          this.maze.drawScoreboardTop();
-        }
-      } catch (_) {
+    resolveTarget(target) {
+      if (!this.maze) {
+        return null;
       }
+      if (typeof target !== "string") {
+        return target || null;
+      }
+      var id = target;
+      if (!Array.isArray(this.maze.tanks)) {
+        return null;
+      }
+      for (var i = 0; i < this.maze.tanks.length; i++) {
+        var tank = this.maze.tanks[i];
+        if (tank && tank.id === id) {
+          return tank;
+        }
+      }
+      return null;
+    }
+    removeFromBoard() {
+      if (!this.maze || typeof this.maze.removePowerup !== "function") {
+        return;
+      }
+      this.maze.removePowerup(this);
+    }
+    attachToTank(tank) {
+      this.tank = tank;
+      tank.addPowerup(this);
+    }
+    startDurationTimer() {
+      var durationMs = this.getDurationMs();
+      if (!durationMs) {
+        return;
+      }
+      this.clearDurationTimer();
+      this.timeout = setTimeout(this.teardown.bind(this), durationMs);
+    }
+    getDurationMs() {
+      if (!this.maze || !this.maze.settings) {
+        return 0;
+      }
+      var seconds = this.maze.settings.powerup_duration;
+      if (!seconds || seconds <= 0) {
+        return 0;
+      }
+      return seconds * 1e3;
+    }
+    teardown() {
+      this.clearDurationTimer();
+      this.detachFromTank();
+      this.refreshScoreboard();
+    }
+    clearDurationTimer() {
+      if (!this.timeout) {
+        return;
+      }
+      clearTimeout(this.timeout);
+      this.timeout = null;
+    }
+    detachFromTank() {
+      if (!this.tank) {
+        return;
+      }
+      var tank = this.tank;
+      tank.removePowerup(this);
+      this.tank = null;
+    }
+    bindTankSpecial(tank, fn) {
+      if (!tank || typeof fn !== "function") {
+        return;
+      }
+      this._originalTankSpecial = typeof tank.special === "function" ? tank.special : function() {
+      };
+      tank.special = fn;
+    }
+    restoreTankSpecial(tank) {
+      if (!tank) {
+        return;
+      }
+      var original = this._originalTankSpecial;
+      tank.special = typeof original === "function" ? original : function() {
+      };
+      this._originalTankSpecial = null;
+    }
+    refreshScoreboard() {
+      if (!this.maze || typeof this.maze.drawScoreboardTop !== "function") {
+        return;
+      }
+      this.maze.drawScoreboardTop();
     }
     registerDelegate(fn) {
       this.delegate = fn;
@@ -254,20 +282,23 @@
       }
     }
   };
-  var TrippyPowerup = class extends Powerup {
+  var BasePowerup_default = Powerup;
+
+  // js/maze/powerups/TrippyPowerup.js
+  var TrippyPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Trippy";
       this.color = "green";
       this.img = document.getElementById("illusion");
     }
-    effect(tank) {
+    effect() {
       if (typeof this.maze.trippyCount !== "number") {
         this.maze.trippyCount = 0;
       }
       this.maze.trippyCount += 1;
     }
-    undo(tank) {
+    undo() {
       if (typeof this.maze.trippyCount !== "number") {
         this.maze.trippyCount = 0;
       }
@@ -277,59 +308,37 @@
       return "global";
     }
   };
-  function createPowerupByType(name, maze) {
-    var n = String(name || "");
-    try {
-      if (/Trippy/i.test(n)) return new TrippyPowerup(maze);
-      if (/Remove\s*Bullet\s*Limit|RemoveBulletLimit/i.test(n)) return new RemoveBulletLimitPowerup(maze);
-      if (/Triple\s*-?Shot|TripleShot/i.test(n)) return new TripleShotPowerup(maze);
-      if (/MoveThroughWalls|ghost/i.test(n)) return new MoveThroughWallsPowerup(maze);
-      if (/Teleport/i.test(n)) return new TeleportPowerup(maze);
-      if (/Cannon(ball)?/i.test(n)) return new CannonballPowerup(maze);
-      if (/Invis/i.test(n)) return new InvisibilityPowerup(maze);
-      if (/Shinra/i.test(n)) return new ShinraTenseiPowerup(maze);
-      if (/Hex/i.test(n)) return new HexPowerup(maze);
-    } catch (e) {
-    }
-    return null;
-  }
-  var RemoveBulletLimitPowerup = class extends Powerup {
+
+  // js/maze/powerups/RemoveBulletLimitPowerup.js
+  var RemoveBulletLimitPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Remove Bullet Limit";
       this.color = "orange";
       this.img = document.getElementById("unlimited");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
-      tank.shouldFire = function() {
-        if (this.shooting) {
-          return true;
-        } else {
-          return false;
-        }
-      };
+      this._oldValue = tank.bullet_limit;
+      tank.bullet_limit = Infinity;
     }
     undo(tank) {
-      tank.shouldFire = function() {
-        if (this.shooting && this.bullets.length < this.bullet_limit) {
-          return true;
-        } else {
-          return false;
-        }
-      };
+      if (this._oldValue != null) {
+        tank.bullet_limit = this._oldValue;
+        this._oldValue = null;
+      }
     }
   };
-  var TripleShotPowerup = class extends Powerup {
+
+  // js/maze/powerups/TripleShotPowerup.js
+  var TripleShotPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Triple-Shot";
       this.color = "red";
       this.img = document.getElementById("tripleshot");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
-      tank.fire = function() {
+      tank._fire = function() {
         this.fire_helper(this.rotation, this.maze.settings.bullet_speed);
         this.fire_helper(this.rotation - Math.PI / 12, this.maze.settings.bullet_speed);
         this.fire_helper(this.rotation + Math.PI / 12, this.maze.settings.bullet_speed);
@@ -337,22 +346,21 @@
       tank.bullet_limit = 3 * this.maze.settings.bullet_limit;
     }
     undo(tank) {
-      {
-        tank.fire = function() {
-          this.fire_helper(this.rotation, this.maze.settings.bullet_speed);
-        };
-        tank.bullet_limit = this.maze.settings.bullet_limit;
-      }
+      tank._fire = function() {
+        this.fire_helper(this.rotation, this.maze.settings.bullet_speed);
+      };
+      tank.bullet_limit = this.maze.settings.bullet_limit;
     }
   };
-  var MoveThroughWallsPowerup = class extends Powerup {
+
+  // js/maze/powerups/MoveThroughWallsPowerup.js
+  var MoveThroughWallsPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "ghost";
       this.color = "blue";
       this.img = document.getElementById("ghost");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
       tank.tryMovingTo = function(pos) {
         var x = pos[0];
@@ -382,14 +390,51 @@
       }
     }
   };
-  var TeleportPowerup = class extends Powerup {
+
+  // js/helper_fns.js
+  function doRectsOverlap(rect1, rect2) {
+    if (rect1[0] + rect1[2] < rect2[0]) {
+      return false;
+    }
+    if (rect1[0] > rect2[0] + rect2[2]) {
+      return false;
+    }
+    if (rect1[1] + rect1[3] < rect2[1]) {
+      return false;
+    }
+    if (rect1[1] > rect2[1] + rect2[3]) {
+      return false;
+    }
+    return true;
+  }
+  function removeElementFromArray(element, array) {
+    if (!array || !Array.isArray(array)) {
+      return;
+    }
+    const idx = array.indexOf(element);
+    if (idx >= 0) {
+      array.splice(idx, 1);
+    }
+  }
+  function shuffle(array) {
+    var result = Array.isArray(array) ? array.slice() : [];
+    for (var i = result.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = result[i];
+      result[i] = result[j];
+      result[j] = tmp;
+    }
+    return result;
+  }
+
+  // js/maze/powerups/TeleportPowerup.js
+  var TeleportPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Teleport";
       this.color = "cyan";
       this.img = document.getElementById("teleport");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
       this.draw_mirror = function() {
         ctx.save();
@@ -401,15 +446,10 @@
         var oldAlpha = ctx.globalAlpha;
         ctx.globalAlpha = 0.3;
         var sprite = document.getElementById("tank");
-        if (isValidImage(sprite)) {
-          var prev = ctx.imageSmoothingEnabled;
-          ctx.imageSmoothingEnabled = true;
-          ctx.drawImage(sprite, -this.width / 2, -this.height / 2, this.width, this.height);
-          ctx.imageSmoothingEnabled = prev;
-        } else {
-          ctx.fillStyle = this.colour;
-          ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
-        }
+        var prev = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(sprite, -this.width / 2, -this.height / 2, this.width, this.height);
+        ctx.imageSmoothingEnabled = prev;
         ctx.globalAlpha = oldAlpha;
         ctx.restore();
       }.bind(tank);
@@ -419,8 +459,8 @@
       }
       tank.maze.extraFunctionsPerCycle.push(this.draw_mirror);
       tank.maze.teleportMirrors[tank.id] = true;
-      tank.special = function() {
-        if (this.poweruplock == true) {
+      var special = function() {
+        if (this.poweruplock === true) {
           return;
         }
         this.x = canvas.width - this.x - this.width;
@@ -441,6 +481,7 @@
         }
         this.poweruplock = true;
       };
+      this.bindTankSpecial(tank, special);
     }
     undo(tank) {
       try {
@@ -460,8 +501,7 @@
         delete tank.maze.teleportMirrors[tank.id];
       } catch (_) {
       }
-      tank.special = function() {
-      };
+      this.restoreTankSpecial(tank);
       tank.poweruplock = false;
       if (tank.maze.doesRectCollide([tank.x, tank.y, tank.width, tank.height])) {
         var sq = tank.maze.getSquareAtXY([tank.x, tank.y]);
@@ -473,14 +513,15 @@
       }
     }
   };
-  var CannonballPowerup = class extends Powerup {
+
+  // js/maze/powerups/CannonballPowerup.js
+  var CannonballPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "CannonBall";
       this.color = "grey";
       this.img = document.getElementById("cannonball");
     }
-    // Override of Bullethit. Removed timer. Cannonball lasts until you use it or replace it.
     onBulletHit(tank) {
       super.onBulletHit(tank);
       if (this.timeout) {
@@ -489,9 +530,21 @@
       }
     }
     effect(tank) {
-      tank.special = function() {
-        this.fire();
+      var special = function() {
+        if (this.is_dead) {
+          return;
+        }
+        if (this.bullets.length >= this.bullet_limit) {
+          return;
+        }
+        if (this.isWithinRechargeWindow()) {
+          return;
+        }
+        this.fireHelper(this.rotation, this.maze.settings.bullet_speed);
         var cannonball = this.bullets[this.bullets.length - 1];
+        if (!cannonball) {
+          return;
+        }
         cannonball.radius = 50;
         var speedMultipler = 2;
         cannonball.direction[0] *= speedMultipler;
@@ -499,32 +552,161 @@
         cannonball.handleMovement = function() {
           this.x += this.direction[0];
           this.y += this.direction[1];
-          if (this.x > canvas.width + this.radius || this.x < 0 - this.radius || this.y > this.tank.maze.height + this.radius || this.y < 0 - this.radius)
+          if (this.x > canvas.width + this.radius || this.x < -this.radius || this.y > this.tank.maze.height + this.radius || this.y < -this.radius) {
             this.tank.removeBullet(this);
+          }
         };
+        var tick = this.maze && typeof this.maze.tick === "number" ? this.maze.tick : 0;
+        this.lastFireTick = tick;
         this.special = function() {
         };
         this.removeAllPowerups();
       };
+      this.bindTankSpecial(tank, special);
     }
     undo(tank) {
-      tank.special = function() {
-      };
+      this.restoreTankSpecial(tank);
     }
   };
-  var InvisibilityPowerup = class extends Powerup {
+
+  // js/maze/powerups/DashPowerup.js
+  var DASH_SPEED_MULTIPLIER = 6;
+  var DASH_MAX_STEPS = 120;
+  var RAF = typeof window !== "undefined" && window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (fn) => setTimeout(fn, 16);
+  var CAF = typeof window !== "undefined" && window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : (id) => clearTimeout(id);
+  var DashPowerup = class extends BasePowerup_default {
+    constructor(maze, x, y) {
+      super(maze, x, y);
+      this.name = "Dash";
+      this.color = "white";
+      this.img = document.getElementById("dash");
+    }
+    effect(tank) {
+      if (!tank) {
+        return;
+      }
+      const dashPowerup = this;
+      const dashHandler = function() {
+        if (this.is_dead || dashPowerup._dashing) {
+          return;
+        }
+        dashPowerup._dashing = true;
+        dashPowerup._activeTank = this;
+        dashPowerup._startDash(this, () => {
+          this.special = function() {
+          };
+          this.removeAllPowerups();
+        });
+      };
+      this.bindTankSpecial(tank, dashHandler);
+    }
+    _startDash(tank, onComplete) {
+      if (!tank || !this.maze) {
+        this._finish(onComplete);
+        return;
+      }
+      const baseSpeed = tank.move_speed || 0;
+      const stepVector = {
+        x: Math.sin(tank.rotation) * baseSpeed * DASH_SPEED_MULTIPLIER,
+        y: -Math.cos(tank.rotation) * baseSpeed * DASH_SPEED_MULTIPLIER
+      };
+      let steps = 0;
+      const tick = () => {
+        if (!tank || tank.is_dead || !this.maze) {
+          return this._finish(onComplete);
+        }
+        steps += 1;
+        const nextX = tank.x + stepVector.x;
+        const nextY = tank.y + stepVector.y;
+        const rect = [nextX, nextY, tank.width, tank.height];
+        const hitTank = this._findTankCollision(tank, rect);
+        if (hitTank) {
+          this._damageTank(hitTank, tank);
+          return this._finish(onComplete);
+        }
+        if (this.maze.doesRectCollide(rect)) {
+          this._damageAllTanksAtRect(tank, rect);
+          return this._finish(onComplete);
+        }
+        tank.x = nextX;
+        tank.y = nextY;
+        if (steps >= DASH_MAX_STEPS) {
+          return this._finish(onComplete);
+        }
+        this._dashFrame = RAF(tick);
+      };
+      tick();
+    }
+    _findTankCollision(sourceTank, rect) {
+      const tanks = this.maze && this.maze.tanks || [];
+      for (let i = 0; i < tanks.length; i++) {
+        const other = tanks[i];
+        if (!other || other === sourceTank || other.is_dead) {
+          continue;
+        }
+        if (this._rectIntersect(rect, [other.x, other.y, other.width, other.height])) {
+          return other;
+        }
+      }
+      return null;
+    }
+    _damageTank(target, instigator) {
+      if (!target || typeof target.onBulletHit !== "function") {
+        return;
+      }
+      try {
+        target.onBulletHit(instigator);
+      } catch (_) {
+      }
+    }
+    _damageAllTanksAtRect(sourceTank, rect) {
+      const tanks = this.maze && this.maze.tanks || [];
+      for (let i = 0; i < tanks.length; i++) {
+        const other = tanks[i];
+        if (!other || other === sourceTank || other.is_dead) {
+          continue;
+        }
+        if (this._rectIntersect(rect, [other.x, other.y, other.width, other.height])) {
+          this._damageTank(other, sourceTank);
+        }
+      }
+    }
+    _rectIntersect(a, b) {
+      return !(a[0] + a[2] <= b[0] || a[0] >= b[0] + b[2] || a[1] + a[3] <= b[1] || a[1] >= b[1] + b[3]);
+    }
+    _finish(onComplete) {
+      if (this._dashFrame) {
+        CAF(this._dashFrame);
+        this._dashFrame = null;
+      }
+      this._dashing = false;
+      if (typeof onComplete === "function") {
+        onComplete();
+      }
+    }
+    undo(tank) {
+      if (this._dashFrame) {
+        CAF(this._dashFrame);
+        this._dashFrame = null;
+      }
+      this._dashing = false;
+      this.restoreTankSpecial(tank);
+    }
+  };
+
+  // js/maze/powerups/InvisibilityPowerup.js
+  var InvisibilityPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Invisibility";
       this.color = "grey";
       this.img = document.getElementById("invisible");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
       tank.old_draw = tank.draw;
       tank.draw = function() {
-        this.bullets.forEach(function(e) {
-          e.draw();
+        this.bullets.forEach(function(bullet) {
+          bullet.draw();
         });
       };
       tank.special = tank.old_draw;
@@ -533,16 +715,17 @@
       tank.draw = tank.old_draw;
     }
   };
-  var ShinraTenseiPowerup = class _ShinraTenseiPowerup extends Powerup {
+
+  // js/maze/powerups/ShinraTenseiPowerup.js
+  var ShinraTenseiPowerup = class _ShinraTenseiPowerup extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Shinra Tensei";
       this.color = "purple";
       this.img = document.getElementById("repel");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
-      tank.special = function() {
+      var special = function() {
         this.maze.tanks.forEach(
           function(tank2) {
             _ShinraTenseiPowerup.repelTank(this, tank2);
@@ -554,13 +737,13 @@
           }.bind(this)
         );
       };
+      this.bindTankSpecial(tank, special);
     }
     undo(tank) {
-      tank.special = function() {
-      };
+      this.restoreTankSpecial(tank);
     }
     static repelTank(repeler, repelee) {
-      if (repeler == repelee) {
+      if (repeler === repelee) {
         return;
       }
       var dx = repelee.x - repeler.x;
@@ -594,47 +777,78 @@
       bullet.direction[1] = vy;
     }
   };
-  var HexPowerup = class extends Powerup {
+
+  // js/maze/powerups/HexPowerup.js
+  var HexPowerup = class extends BasePowerup_default {
     constructor(maze, x, y) {
       super(maze, x, y);
       this.name = "Hex";
       this.color = "purple";
       this.img = document.getElementById("hex");
     }
-    // Effect and undo methods remain unchanged.
     effect(tank) {
-      tank.maze.tanks.forEach(function(tank2) {
-        [tank2.onLeftPress, tank2.onRightPress] = [
-          tank2.onRightPress,
-          tank2.onLeftPress
-        ];
-        [tank2.onUpPress, tank2.onDownPress] = [tank2.onDownPress, tank2.onUpPress];
+      tank.maze.tanks.forEach(function(target) {
+        [target.onLeftPress, target.onRightPress] = [target.onRightPress, target.onLeftPress];
+        [target.onUpPress, target.onDownPress] = [target.onDownPress, target.onUpPress];
       });
     }
     undo(tank) {
       this.effect(tank);
     }
   };
-  function generatePowerup(maze) {
-    const powerupNo = Math.floor(8 * Math.random());
-    switch (powerupNo) {
-      case 0:
-        return new TrippyPowerup(maze);
-      case 1:
-        return new RemoveBulletLimitPowerup(maze);
-      case 2:
-        return new TripleShotPowerup(maze);
-      case 3:
-        return new MoveThroughWallsPowerup(maze);
-      case 4:
-        return new TeleportPowerup(maze);
-      case 5:
-        return new CannonballPowerup(maze);
-      case 6:
-        return new ShinraTenseiPowerup(maze);
-      case 7:
-        return new MoveThroughWallsPowerup(maze);
+
+  // js/maze/Powerup.js
+  var POWERUP_DEFINITIONS = [
+    { ctor: TrippyPowerup, keys: ["trippy"] },
+    { ctor: RemoveBulletLimitPowerup, keys: ["remove bullet limit", "removebulletlimit"] },
+    { ctor: TripleShotPowerup, keys: ["triple-shot", "tripleshot"] },
+    { ctor: MoveThroughWallsPowerup, keys: ["movethroughwalls", "ghost"] },
+    { ctor: TeleportPowerup, keys: ["teleport"] },
+    { ctor: CannonballPowerup, keys: ["cannonball", "cannon"] },
+    { ctor: DashPowerup, keys: ["dash", "charge"] },
+    { ctor: InvisibilityPowerup, keys: ["invis", "invisibility"] },
+    { ctor: ShinraTenseiPowerup, keys: ["shinra", "tensei"] },
+    { ctor: HexPowerup, keys: ["hex"] }
+  ];
+  var POWERUP_RANDOM_POOL = [
+    TrippyPowerup,
+    RemoveBulletLimitPowerup,
+    TripleShotPowerup,
+    MoveThroughWallsPowerup,
+    TeleportPowerup,
+    CannonballPowerup,
+    DashPowerup,
+    ShinraTenseiPowerup
+  ];
+  function createPowerupByType(name, maze) {
+    if (!name) {
+      return null;
     }
+    var normalized = String(name).toLowerCase();
+    for (var i = 0; i < POWERUP_DEFINITIONS.length; i++) {
+      var entry = POWERUP_DEFINITIONS[i];
+      var ctor = entry.ctor;
+      if (!ctor) {
+        continue;
+      }
+      for (var j = 0; j < entry.keys.length; j++) {
+        if (normalized.indexOf(entry.keys[j]) !== -1) {
+          return new ctor(maze);
+        }
+      }
+      if (ctor.name && ctor.name.toLowerCase() === normalized) {
+        return new ctor(maze);
+      }
+    }
+    return null;
+  }
+  function generatePowerup(maze) {
+    if (!POWERUP_RANDOM_POOL.length) {
+      return null;
+    }
+    var index = Math.floor(Math.random() * POWERUP_RANDOM_POOL.length);
+    var Ctor = POWERUP_RANDOM_POOL[index];
+    return new Ctor(maze);
   }
 
   // js/networking/protocol_router.js
@@ -723,8 +937,8 @@
             var now = Math.floor(performance.now());
             var now32 = now >>> 0;
             var diff = now32 - ts >>> 0;
-            if (diff <= 3e4) {
-              manager._stats.rttMs = diff;
+            if (diff <= 3e4 && manager && typeof manager.updateRoundTripTime === "function") {
+              manager.updateRoundTripTime(diff);
             }
           } catch (e) {
           }
@@ -1572,14 +1786,67 @@
   };
   var netBinary = api;
 
-  // js/networking/peer_manager.js
-  var PeerManager = class {
+  // js/networking/NetworkInstrumentation.js
+  var NetworkInstrumentation = class {
     constructor() {
-      this.remoteTankConfigs = {};
-      this.localTankConfigs = [];
-      this.game = null;
-      this.reset();
-      this._stats = {
+      this.stats = this._createStatsBucket();
+      this._lastSnapshot = this._createStatsBucket();
+      this._statsTimer = null;
+      this._pingTimer = null;
+      this._options = { isHost: true, pingCallback: null };
+    }
+    start(options = {}) {
+      this.stop();
+      this._options = {
+        isHost: options.isHost !== false,
+        pingCallback: typeof options.pingCallback === "function" ? options.pingCallback : null
+      };
+      this._statsTimer = setInterval(() => {
+        const deltaSentBytes = this.stats.sentBytes - this._lastSnapshot.sentBytes;
+        const deltaRecvBytes = this.stats.recvBytes - this._lastSnapshot.recvBytes;
+        const deltaSentMessages = this.stats.sentMessages - this._lastSnapshot.sentMessages;
+        const deltaRecvMessages = this.stats.recvMessages - this._lastSnapshot.recvMessages;
+        this._lastSnapshot = Object.assign({}, this.stats);
+        this.stats.bytesSentPerSec = deltaSentBytes;
+        this.stats.bytesRecvPerSec = deltaRecvBytes;
+        this.stats.sentPerSec = deltaSentMessages;
+        this.stats.recvPerSec = deltaRecvMessages;
+        eventHub.emit("network-stats", Object.assign({}, this.stats));
+      }, 1e3);
+      if (!this._options.isHost && this._options.pingCallback) {
+        this._pingTimer = setInterval(() => {
+          try {
+            this._options.pingCallback();
+          } catch (_) {
+          }
+        }, 2e3);
+      }
+    }
+    stop() {
+      if (this._statsTimer) {
+        clearInterval(this._statsTimer);
+        this._statsTimer = null;
+      }
+      if (this._pingTimer) {
+        clearInterval(this._pingTimer);
+        this._pingTimer = null;
+      }
+      this.stats = this._createStatsBucket();
+      this._lastSnapshot = this._createStatsBucket();
+    }
+    recordOutgoing(size) {
+      this.stats.sentBytes += size;
+      this.stats.sentMessages += 1;
+    }
+    recordIncoming(size) {
+      this.stats.recvBytes += size;
+      this.stats.recvMessages += 1;
+    }
+    setRoundTripTime(ms) {
+      this.stats.rttMs = ms;
+    }
+    _createStatsBucket() {
+      return {
         sentBytes: 0,
         sentMessages: 0,
         recvBytes: 0,
@@ -1590,9 +1857,17 @@
         bytesRecvPerSec: 0,
         rttMs: null
       };
-      this._lastStatsSnapshot = { sentBytes: 0, recvBytes: 0, sentMessages: 0, recvMessages: 0 };
-      this._statsTimer = null;
-      this._pingTimer = null;
+    }
+  };
+
+  // js/networking/peer_manager.js
+  var PeerManager = class {
+    constructor() {
+      this.remoteTankConfigs = {};
+      this.localTankConfigs = [];
+      this.game = null;
+      this.instrumentation = new NetworkInstrumentation();
+      this.reset();
     }
     reset() {
       if (this.peer) {
@@ -1615,14 +1890,15 @@
         this.remoteTankConfigs[this.id || "host"] = this.localTankConfigs || [];
       }
       this.stopInstrumentation();
+      eventHub.emit("network-reset");
     }
     hostRoom(roomName, nickname) {
       if (!window.Peer) {
         eventHub.emit("network-status", "PeerJS library not available.");
         return;
       }
-      roomName = sanitize(roomName);
-      nickname = sanitize(nickname) || "Commander";
+      roomName = sanitizeRoomName(roomName);
+      nickname = sanitizeNickname(nickname) || "Commander";
       if (!roomName) {
         eventHub.emit("network-status", "Please provide a room name to host.");
         return;
@@ -1659,8 +1935,8 @@
         eventHub.emit("network-status", "PeerJS library not available.");
         return;
       }
-      roomName = sanitize(roomName);
-      nickname = sanitize(nickname) || randomCallsign();
+      roomName = sanitizeRoomName(roomName);
+      nickname = sanitizeNickname(nickname) || randomCallsign();
       if (!roomName) {
         eventHub.emit("network-status", "Please enter a room name or ID to join.");
         return;
@@ -1692,17 +1968,7 @@
       conn._handled = true;
       this.connections.push(conn);
       conn.on("data", (data) => {
-        try {
-          var size = 0;
-          if (typeof data === "string") {
-            size = data.length;
-          } else if (data && data.byteLength) {
-            size = data.byteLength;
-          }
-          this._stats.recvBytes += size;
-          this._stats.recvMessages += 1;
-        } catch (_) {
-        }
+        this._recordIncomingPayload(data);
         if (netProtocol && typeof netProtocol.handlePeerMessage === "function") {
           netProtocol.handlePeerMessage(this, data, conn);
         }
@@ -1729,6 +1995,7 @@
         if (!this.isHost) {
           eventHub.emit("network-status", 'Connected to host "' + conn.peer + '".');
           eventHub.emit("network-ready", { role: "guest", roomId: this.roomName });
+          this.readyNotified = true;
           addChatMessage('You joined room "' + this.roomName + '" as "' + this.nickname + '".', "notification-message");
           this.startInstrumentation();
         }
@@ -1743,6 +2010,7 @@
         if (this.isHost) {
           this.sendPlayerListTo(conn);
           this.broadcastPlayerList();
+          this.sendCachedTankConfigsTo(conn);
           if (this.game && this.game.main_object && typeof this.game.main_object.getCachedSnapshot === "function") {
             if (this.game && this.game.maze && typeof this.game.maze.serializeInitString === "function") {
               try {
@@ -1820,17 +2088,7 @@
         if (conn.open && conn !== excludeConn) {
           try {
             conn.send(outMsg);
-            try {
-              var size = 0;
-              if (typeof outMsg === "string") {
-                size = outMsg.length;
-              } else if (outMsg && outMsg.byteLength) {
-                size = outMsg.byteLength;
-              }
-              this._stats.sentBytes += size;
-              this._stats.sentMessages += 1;
-            } catch (_) {
-            }
+            this._recordOutgoingPayload(outMsg);
           } catch (err) {
           }
         }
@@ -1883,19 +2141,39 @@
         this.remoteTankConfigs[peerId] = this.localTankConfigs;
       }
       try {
-        const blocks = (this.localTankConfigs || []).map((cfg) => {
-          const pid = netProtocol.encodeFreeText(cfg.panelId || "");
-          const col = netProtocol.encodeFreeText(cfg.colour || "");
-          const cs = (cfg.controls || []).slice(0, 6).map(netProtocol.encodeFreeText);
-          while (cs.length < 6) {
-            cs.push("");
-          }
-          return [pid, col].concat(cs).join("|");
-        }).join(";");
-        const msg = ["T", peerId, blocks].join(",");
+        const msg = this.buildTankConfigMessage(peerId, this.localTankConfigs);
         this.broadcast(msg);
       } catch (e) {
       }
+    }
+    buildTankConfigMessage(peerId, configs) {
+      const blocks = (configs || []).map((cfg) => {
+        const pid = netProtocol.encodeFreeText(cfg.panelId || "");
+        const col = netProtocol.encodeFreeText(cfg.colour || "");
+        const cs = (cfg.controls || []).slice(0, 6).map(netProtocol.encodeFreeText);
+        while (cs.length < 6) {
+          cs.push("");
+        }
+        return [pid, col].concat(cs).join("|");
+      }).join(";");
+      return ["T", peerId, blocks].join(",");
+    }
+    sendCachedTankConfigsTo(conn) {
+      if (!conn || !conn.open) {
+        return;
+      }
+      const map = this.remoteTankConfigs || {};
+      Object.keys(map).forEach((peerId) => {
+        const configs = map[peerId];
+        if (!peerId || !Array.isArray(configs)) {
+          return;
+        }
+        try {
+          const msg = this.buildTankConfigMessage(peerId, configs);
+          conn.send(msg);
+        } catch (_) {
+        }
+      });
     }
     sendInputState(state) {
       if (!state || !state.tankId) {
@@ -1972,61 +2250,55 @@
       this.readyNotified = true;
       eventHub.emit("network-ready", { role: this.isHost ? "host" : "guest", roomId: this.isHost ? this.id : this.roomName });
     }
+    _recordIncomingPayload(payload) {
+      try {
+        var size = 0;
+        if (typeof payload === "string") {
+          size = payload.length;
+        } else if (payload && payload.byteLength) {
+          size = payload.byteLength;
+        }
+        this.instrumentation.recordIncoming(size);
+      } catch (_) {
+      }
+    }
+    _recordOutgoingPayload(payload) {
+      try {
+        var size = 0;
+        if (typeof payload === "string") {
+          size = payload.length;
+        } else if (payload && payload.byteLength) {
+          size = payload.byteLength;
+        }
+        this.instrumentation.recordOutgoing(size);
+      } catch (_) {
+      }
+    }
     // --- instrumentation ---
     startInstrumentation() {
-      this.stopInstrumentation();
-      this._statsTimer = setInterval(() => {
-        const sb = this._stats.sentBytes - this._lastStatsSnapshot.sentBytes;
-        const rb = this._stats.recvBytes - this._lastStatsSnapshot.recvBytes;
-        const sm = this._stats.sentMessages - this._lastStatsSnapshot.sentMessages;
-        const rm = this._stats.recvMessages - this._lastStatsSnapshot.recvMessages;
-        this._lastStatsSnapshot = {
-          sentBytes: this._stats.sentBytes,
-          recvBytes: this._stats.recvBytes,
-          sentMessages: this._stats.sentMessages,
-          recvMessages: this._stats.recvMessages
-        };
-        this._stats.bytesSentPerSec = sb;
-        this._stats.bytesRecvPerSec = rb;
-        this._stats.sentPerSec = sm;
-        this._stats.recvPerSec = rm;
-        eventHub.emit("network-stats", Object.assign({}, this._stats));
-      }, 1e3);
-      if (!this.isHost) {
-        this._pingTimer = setInterval(() => {
+      this.instrumentation.start({
+        isHost: this.isHost,
+        pingCallback: () => {
           const ts = Math.floor(performance.now());
           try {
             this.broadcast(netBinary.buildPing(ts));
           } catch (_) {
           }
-        }, 2e3);
-      }
+        }
+      });
     }
     stopInstrumentation() {
-      if (this._statsTimer) {
-        clearInterval(this._statsTimer);
-        this._statsTimer = null;
-      }
-      if (this._pingTimer) {
-        clearInterval(this._pingTimer);
-        this._pingTimer = null;
-      }
-      if (this._stats) {
-        this._stats.rttMs = null;
-        this._stats.sentBytes = 0;
-        this._stats.recvBytes = 0;
-        this._stats.sentMessages = 0;
-        this._stats.recvMessages = 0;
-        this._stats.bytesSentPerSec = 0;
-        this._stats.bytesRecvPerSec = 0;
-        this._stats.sentPerSec = 0;
-        this._stats.recvPerSec = 0;
-      }
-      this._lastStatsSnapshot = { sentBytes: 0, recvBytes: 0, sentMessages: 0, recvMessages: 0 };
+      this.instrumentation.stop();
+    }
+    updateRoundTripTime(ms) {
+      this.instrumentation.setRoundTripTime(ms);
     }
   };
-  function sanitize(value) {
+  function sanitizeNickname(value) {
     return (value || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim();
+  }
+  function sanitizeRoomName(value) {
+    return (value || "").replace(/[^a-zA-Z0-9_-]/g, "").trim();
   }
   function utf8Encode(str) {
     str = "" + (str == null ? "" : str);
@@ -2212,8 +2484,174 @@
     return CALLSIGNS[i];
   }
 
+  // js/networking/networking_dom.js
+  var OVERLAY_STYLE = `/* Theme */
+:root {
+  --net-bg: rgba(10, 22, 46, 0.92);
+  --net-overlay-tint: rgba(8, 16, 32, 0.6);
+  --net-border: #214d7a;
+  --net-glow: rgba(79, 181, 255, 0.35);
+  --net-accent: #9fd1ff;
+  --net-text: #e8f2ff;
+  --net-muted: #9bb3cd;
+  --net-input-bg: #0f223f;
+  --net-input-border: #2b4e76;
+  --net-btn-bg: #133055;
+  --net-btn-border: #2b5b8e;
+  --net-btn-hover: #1a3b66;
+  --net-chat-self: #62e0a1;
+  --net-chat-note: #8fb0d1;
+}
+
+.net-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--net-overlay-tint); z-index: 1000; font-family: system-ui, sans-serif; color: var(--net-text); }
+.net-overlay.hidden { display: none !important; }
+.net-panel { position: relative; background: var(--net-bg); border: 1px solid var(--net-border); box-shadow: 0 0 0 1px var(--net-border), 0 8px 30px var(--net-glow), inset 0 0 40px rgba(0,0,0,0.35); width: min(860px, 92vw); max-height: 90vh; padding: 16px; overflow: auto; border-radius: 10px; }
+.net-panel h2 { margin: 0 0 8px 0; font-size: 18px; letter-spacing: 0.5px; color: var(--net-accent); }
+.net-status { margin: 4px 0 12px 0; font-size: 13px; color: var(--net-muted); white-space: pre-line; }
+.net-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.net-controls input { padding: 8px 10px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; }
+.net-controls input::placeholder { color: #6d8db1; }
+.net-controls button { padding: 8px 12px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; cursor: pointer; transition: background 120ms ease; }
+.net-controls button:hover { background: var(--net-btn-hover); }
+.net-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+#player-list { border: 1px solid var(--net-input-border); padding: 8px; min-height: 160px; background: rgba(8,20,40,0.6); margin: 0; list-style: none; border-radius: 6px; }
+#player-list li { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+#player-list li:last-child { border-bottom: none; }
+#player-list .player-list-empty { color: var(--net-muted); font-style: italic; }
+.net-room-code { margin: 0 0 12px 0; font-size: 14px; color: var(--net-accent); }
+.net-section h3 { margin: 0 0 6px 0; font-size: 15px; color: var(--net-accent); }
+.net-section p { margin: 0 0 8px 0; font-size: 13px; color: var(--net-text); line-height: 1.4; }
+.chat-message { margin: 2px 0; }
+.chat-message.notification-message { color: var(--net-chat-note); font-style: italic; }
+.chat-message.self-message { color: var(--net-chat-self); }
+.net-close { position: absolute; right: 16px; top: 16px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+`;
+  var CHAT_STYLE = `#app-shell { position: fixed; inset: 0; display: flex; flex-direction: row; align-items: center; }
+#game-slot { position: relative; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-width: 0; }
+#myCanvas { display: block; max-width: 100%; max-height: 100%; }
+#networking-chat-panel {
+  position: relative;
+  height: -webkit-fill-available;
+  height: -moz-available;
+  z-index: 1;
+  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  width: var(--chat-width, 0px);
+  min-width: 0;
+  overflow: hidden;
+  transition: width 160ms ease;
+  box-sizing: border-box;
+  max-height: none;
+  min-height: 0;
+  border-left: 1px solid var(--net-border);
+  height: webkit-fill-available;
+}
+#networking-chat-panel.hidden { display: none; }
+#networking-chat-panel.chat-open { --chat-width: min(34vw, 420px); }
+#chat-resize-handle { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; }
+#chat-resize-handle::after { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.08); }
+#networking-chat-panel #chat { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: hidden; }
+#chat-messages { padding: 8px; flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; background: rgba(8,20,40,0.6); color: var(--net-text); border: 1px solid var(--net-input-border); border-radius: 6px; word-break: break-word; overflow-wrap: anywhere; }
+#chat-input { display: flex; gap: 8px; margin-top: 8px; height: 41.6px; flex-shrink: 0; min-width: 0; overflow: hidden; }
+#chat-message-input { flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: 1px solid var(--net-input-border); border-radius: 6px; background: var(--net-input-bg); color: var(--net-text); outline: none; }
+#chat-send-btn { flex: 0 0 auto; padding: 8px 12px; border: 1px solid var(--net-btn-border); background: var(--net-btn-bg); color: var(--net-text); border-radius: 6px; cursor: pointer; transition: background 120ms ease; }
+#chat-send-btn:hover { background: var(--net-btn-hover); }
+`;
+  var CONNECT_TEMPLATE = `  <div id="networking-connect-overlay" class="net-overlay hidden">
+    <div id="networking-connect-panel" class="net-panel">
+      <button id="networking-close-connect-btn" class="net-close">Close</button>
+      <h2>Networking</h2>
+      <div class="net-status"><span id="network-status-connect">Idle</span></div>
+      <div class="net-controls">
+        <input id="nickname" type="text" placeholder="Nickname" />
+        <input id="room-name" type="text" placeholder="Room Name or Code" />
+        <button id="host-room-btn">Host Room</button>
+        <button id="join-room-btn">Join Room</button>
+      </div>
+      <div class="net-room-code">Room Code: <span id="room-code">---</span></div>
+      <div class="net-grid">
+        <section class="net-section">
+          <h3>Connected Players</h3>
+          <ul id="player-list" aria-live="polite">
+            <li class="player-list-empty">Waiting for players...</li>
+          </ul>
+        </section>
+        <section class="net-section">
+          <h3>How It Works</h3>
+          <p>Host a room and share the code above so friends can join.</p>
+          <p>When guests connect, this list updates instantly for everyone.</p>
+        </section>
+      </div>
+    </div>
+  </div>`;
+  var CHAT_TEMPLATE = `  <div id="networking-chat-panel" class="net-panel hidden">
+    <div id="chat-resize-handle" aria-hidden="true"></div>
+    <div id="chat">
+      <div id="chat-messages"></div>
+      <div id="chat-input">
+        <input id="chat-message-input" type="text" placeholder="Type a message" />
+        <button id="chat-send-btn">Send</button>
+      </div>
+    </div>
+  </div>`;
+  var STATS_TEMPLATE = `  <div id="net-stats-overlay" class="net-overlay hidden">
+    <div class="net-panel">
+      <button class="net-close" onclick="this.closest('.net-overlay').classList.add('hidden')">Close</button>
+      <h2>Network Stats</h2>
+      <div class="net-status"><span id="network-status">Idle</span></div>
+    </div>
+  </div>`;
+  function injectStyle(id, css) {
+    if (document.getElementById(id)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+  function ensureOverlay() {
+    if (document.getElementById("networking-connect-overlay")) {
+      return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = CONNECT_TEMPLATE.trim();
+    document.body.appendChild(wrapper.firstElementChild);
+  }
+  function ensureChatPanel() {
+    if (document.getElementById("networking-chat-panel")) {
+      return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = CHAT_TEMPLATE.trim();
+    const panel = wrapper.firstElementChild;
+    const appShell = document.getElementById("app-shell");
+    if (appShell) {
+      appShell.appendChild(panel);
+    } else {
+      document.body.appendChild(panel);
+    }
+  }
+  function ensureStatsOverlay() {
+    if (document.getElementById("net-stats-overlay")) {
+      return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = STATS_TEMPLATE.trim();
+    document.body.appendChild(wrapper.firstElementChild);
+  }
+  function ensureNetworkingDom() {
+    injectStyle("networking-overlay-style", OVERLAY_STYLE);
+    injectStyle("networking-chat-style", CHAT_STYLE);
+    ensureOverlay();
+    ensureChatPanel();
+    ensureStatsOverlay();
+  }
+
   // js/networking/NetworkingScreen.js
   function NetworkingScreen(game2) {
+    ensureNetworkingDom();
     this.game = game2;
     this.connectOverlay = null;
     this.chatOverlay = null;
@@ -2254,6 +2692,9 @@
     this.enterLobbyButton = document.getElementById("enter-lobby-btn");
     this.playerListEl = document.getElementById("player-list");
     this.roomCodeEl = document.getElementById("room-code");
+    if (this.roomCodeEl && (!peerManager || !peerManager.readyNotified)) {
+      this.roomCodeEl.textContent = "---";
+    }
     this.chatInput = document.getElementById("chat-message-input");
     this.sendButton = document.getElementById("chat-send-btn");
     this.chatPanel = document.getElementById("networking-chat-panel");
@@ -2265,13 +2706,11 @@
     if (this.hostButton) {
       this.hostButton.addEventListener("click", function() {
         peerManager.hostRoom(self.roomInput.value, self.nicknameInput.value);
-        self.showChatOverlay();
       });
     }
     if (this.joinButton) {
       this.joinButton.addEventListener("click", function() {
         peerManager.joinRoom(self.roomInput.value, self.nicknameInput.value);
-        self.showChatOverlay();
       });
     }
     if (this.closeConnectButton) {
@@ -2301,6 +2740,9 @@
       if (!info) {
         return;
       }
+      if (self.roomCodeEl) {
+        self.roomCodeEl.textContent = info.roomId || "---";
+      }
       if (self.sendButton) {
         self.sendButton.disabled = false;
       }
@@ -2323,6 +2765,11 @@
       }
       if (self.game && self.game.pregame && typeof self.game.pregame.emitTankConfig === "function") {
         self.game.pregame.emitTankConfig();
+      }
+    });
+    eventHub.on("network-reset", function() {
+      if (self.roomCodeEl) {
+        self.roomCodeEl.textContent = "---";
       }
     });
     eventHub.on("network-player-list", function(players) {
@@ -2441,15 +2888,38 @@
       this.playerListEl.appendChild(item);
     }
   };
+  NetworkingScreen.prototype.setOverlayMode = function(mode) {
+    if (!this.overlayState) {
+      this.overlayState = { mode: "connect" };
+    }
+    if (!this.overlayEnabled && mode !== "hidden") {
+      return;
+    }
+    if (this.overlayState.mode === mode) {
+      return;
+    }
+    this.overlayState.mode = mode;
+    this.ensureDom();
+    if (this.connectOverlay) {
+      if (mode === "connect") {
+        this.connectOverlay.classList.remove("hidden");
+        this.connectOverlay.style.display = "flex";
+      } else {
+        this.connectOverlay.classList.add("hidden");
+        this.connectOverlay.style.display = "";
+      }
+    }
+    if (this.chatPanel && (mode === "chat" || mode === "hidden")) {
+      this.chatPanel.classList.remove("hidden");
+      this.chatPanel.classList.add("chat-open");
+    }
+  };
   NetworkingScreen.prototype.showOverlay = function() {
     if (!this.overlayEnabled) {
       return;
     }
-    if (peerManager && (peerManager.connections || []).length > 0 || peerManager && peerManager.readyNotified) {
-      this.showChatOverlay();
-    } else {
-      this.showConnectOverlay();
-    }
+    var hasNetwork = peerManager && ((peerManager.connections || []).length > 0 || peerManager.readyNotified);
+    this.setOverlayMode(hasNetwork ? "chat" : "connect");
   };
   NetworkingScreen.prototype.showConnectOverlay = function() {
     if (!this.overlayEnabled) {
@@ -2557,42 +3027,6 @@
     }
   };
 
-  // js/helper_fns.js
-  function doRectsOverlap(rect1, rect2) {
-    if (rect1[0] + rect1[2] < rect2[0]) {
-      return false;
-    }
-    if (rect1[0] > rect2[0] + rect2[2]) {
-      return false;
-    }
-    if (rect1[1] + rect1[3] < rect2[1]) {
-      return false;
-    }
-    if (rect1[1] > rect2[1] + rect2[3]) {
-      return false;
-    }
-    return true;
-  }
-  function removeElementFromArray2(element, array) {
-    if (!array || !Array.isArray(array)) {
-      return;
-    }
-    const idx = array.indexOf(element);
-    if (idx >= 0) {
-      array.splice(idx, 1);
-    }
-  }
-  function shuffle(array) {
-    var tmp = [];
-    var src = array.slice();
-    while (src.length > 0) {
-      var rnd = Math.floor(Math.random() * src.length);
-      tmp.push(src[rnd]);
-      src.splice(rnd, 1);
-    }
-    return tmp;
-  }
-
   // js/maze/Square.js
   var Square = class {
     constructor(maze, row, col) {
@@ -2610,6 +3044,7 @@
       this.x = rect.x;
       this.y = rect.y;
       this.visited = false;
+      this._candidateWalls = null;
     }
     draw() {
     }
@@ -2659,12 +3094,30 @@
     }
     // Return active wall rects for collision (canonical: east/south and borders)
     getWalls() {
-      var rects = [];
-      if (this.row === 0 && this.north && this.north.isActive) rects.push(this.north.getRect());
-      if (this.col === 0 && this.west && this.west.isActive) rects.push(this.west.getRect());
-      if (this.east && this.east.isActive) rects.push(this.east.getRect());
-      if (this.south && this.south.isActive) rects.push(this.south.getRect());
-      return rects;
+      if (!this._candidateWalls) {
+        var candidates = [];
+        if (this.row === 0 && this.north) {
+          candidates.push(this.north);
+        }
+        if (this.col === 0 && this.west) {
+          candidates.push(this.west);
+        }
+        if (this.east) {
+          candidates.push(this.east);
+        }
+        if (this.south) {
+          candidates.push(this.south);
+        }
+        this._candidateWalls = candidates;
+      }
+      var active = [];
+      for (var i = 0; i < this._candidateWalls.length; i++) {
+        var wall = this._candidateWalls[i];
+        if (wall && wall.isActive) {
+          active.push(wall);
+        }
+      }
+      return active;
     }
     hasActiveBorderWith(square) {
       if (this.row == square.row) {
@@ -2696,6 +3149,25 @@
   var lastSignature = "";
   var lastTankSpriteSrc = "";
   var lastNetworkIconSrc = "";
+  var TEST_BUTTON_FLAG_KEY2 = "debug";
+  function shouldShowTestButton() {
+    try {
+      if (typeof localStorage === "undefined") {
+        return false;
+      }
+      return localStorage.getItem(TEST_BUTTON_FLAG_KEY2) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+  function updateTestButtonVisibility() {
+    if (!testBtn) {
+      return;
+    }
+    const show = shouldShowTestButton();
+    testBtn.style.display = show ? "" : "none";
+    testBtn.setAttribute("aria-hidden", show ? "false" : "true");
+  }
   function ensureStructure() {
     if (!rootEl) {
       rootEl = document.getElementById("hud-scoreboard");
@@ -2721,6 +3193,9 @@
     }
     if (!testBtn) {
       testBtn = innerEl.querySelector(".sb-test");
+    }
+    if (testBtn) {
+      updateTestButtonVisibility();
     }
     if (!networkImg) {
       const networkBtn = innerEl.querySelector(".sb-network");
@@ -2857,27 +3332,1096 @@
     }
   }
 
+  // js/maze/MazeRenderer.js
+  var MazeRenderer = class {
+    constructor(maze) {
+      this.maze = maze;
+    }
+    drawFrame() {
+      if ((this.maze.trippyCount || 0) > 0) {
+        this.drawScoreboardTop();
+        this.drawDynamicObjects();
+        return;
+      }
+      this.drawScoreboardTop();
+      this.drawBackground();
+      this.drawDynamicObjects();
+    }
+    drawScoreboardTop() {
+      if (typeof ctx.setTransform === "function") {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      var panelH = this.maze.scoreboardHeight;
+      ctx.clearRect(0, 0, canvas.width, panelH);
+      this.maze._gearBtnRect = null;
+      try {
+        layoutHudOverCanvas();
+        setHudScoreboardVisible(true);
+      } catch (_) {
+      }
+      var tanksSrc = this.maze.spectator ? this.maze.remoteTankMeta || [] : this.maze.tanks || [];
+      var players = [];
+      for (var i = 0; i < tanksSrc.length; i++) {
+        var t = tanksSrc[i];
+        if (!t) {
+          continue;
+        }
+        var scoreVal = typeof t.score === "number" ? t.score : parseInt(t.score || "0", 10) || 0;
+        var iconId = null;
+        var powerupsList = t && Array.isArray(t.powerups) ? t.powerups : [];
+        for (var pi = 0; pi < powerupsList.length; pi++) {
+          var power = powerupsList[pi];
+          if (!power) {
+            continue;
+          }
+          if (!this.maze.spectator && power.img && power.img.id) {
+            iconId = power.img.id;
+            break;
+          }
+          if (power.spriteId) {
+            iconId = power.spriteId;
+            break;
+          }
+        }
+        players.push({
+          id: t.id || "tank-" + (i + 1),
+          score: scoreVal,
+          powerupIconId: iconId || null
+        });
+      }
+      renderHudScoreboard({ players });
+    }
+    drawBackground() {
+      ctx.save();
+      if (typeof ctx.setTransform === "function") {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      var gy = this.maze.scoreboardHeight;
+      var gh = canvas.height - gy;
+      ctx.clearRect(0, gy, canvas.width, gh);
+      ctx.translate(0, this.maze.scoreboardHeight);
+      ctx.translate(this.maze.wall_thiccness / 2, this.maze.wall_thiccness / 2);
+      for (var ri = 0; ri < this.maze.squares.length; ri++) {
+        var row = this.maze.squares[ri];
+        for (var ci = 0; ci < row.length; ci++) {
+          var square = row[ci];
+          var fill = (square.row + square.col) % 2 === 0 ? "#C0C0C0" : "#E0E0E0";
+          ctx.fillStyle = fill;
+          ctx.fillRect(square.x, square.y, square.width, square.height);
+        }
+      }
+      ctx.fillStyle = "black";
+      for (var wi = 0; wi < this.maze.walls.length; wi++) {
+        var w = this.maze.walls[wi];
+        if (!w.isActive) continue;
+        ctx.fillRect(w.x, w.y, w.width, w.height);
+      }
+      ctx.restore();
+    }
+    drawDynamicObjects() {
+      try {
+        this.maze._pruneStaleExtraFunctions();
+      } catch (_) {
+      }
+      ctx.save();
+      ctx.translate(0, this.maze.scoreboardHeight);
+      ctx.translate(this.maze.wall_thiccness / 2, this.maze.wall_thiccness / 2);
+      this.maze.tanks.forEach(function(tank) {
+        tank.draw();
+      });
+      this.maze.powerups.forEach(function(powerup) {
+        powerup.draw();
+      });
+      this.maze.extraFunctionsPerCycle.forEach(function(f) {
+        try {
+          f();
+        } catch (e) {
+        }
+      });
+      ctx.restore();
+    }
+  };
+  var MazeRenderer_default = MazeRenderer;
+
+  // js/maze/state_helpers.js
+  var state_helpers_exports = {};
+  __export(state_helpers_exports, {
+    applyDeltaString: () => applyDeltaString,
+    applyInitString: () => applyInitString,
+    applyUnifiedDelta: () => applyUnifiedDelta,
+    applyUnifiedSnapshot: () => applyUnifiedSnapshot,
+    buildStatePacket: () => buildStatePacket,
+    buildUnifiedDeltaPacket: () => buildUnifiedDeltaPacket,
+    captureState: () => captureState,
+    clonePowerupList: () => clonePowerupList,
+    clonePowerupState: () => clonePowerupState,
+    cloneSnapshot: () => cloneSnapshot,
+    cloneTankState: () => cloneTankState,
+    collectRemoteTankMeta: () => collectRemoteTankMeta,
+    diffSnapshots: () => diffSnapshots,
+    getCachedSnapshot: () => getCachedSnapshot,
+    hasTankChanged: () => hasTankChanged,
+    haveBoardPowerupsChanged: () => haveBoardPowerupsChanged,
+    haveBulletsChanged: () => haveBulletsChanged,
+    havePowerupsChanged: () => havePowerupsChanged,
+    loadLayout: () => loadLayout,
+    recomputeGlobalPowerups: () => recomputeGlobalPowerups,
+    serializeBoardPowerups: () => serializeBoardPowerups,
+    serializeDeltaString: () => serializeDeltaString,
+    serializeInitString: () => serializeInitString,
+    serializeLayout: () => serializeLayout,
+    serializeState: () => serializeState,
+    serializeUnifiedDelta: () => serializeUnifiedDelta,
+    serializeUnifiedSnapshot: () => serializeUnifiedSnapshot,
+    syncGlobalPowerups: () => syncGlobalPowerups
+  });
+  function serializeLayout() {
+    var layout = [];
+    for (var r = 0; r < this.squares.length; r++) {
+      var row = [];
+      for (var c = 0; c < this.squares[r].length; c++) {
+        var sq = this.squares[r][c];
+        row.push({
+          north: !!(sq.north && sq.north.isActive),
+          south: !!(sq.south && sq.south.isActive),
+          east: !!(sq.east && sq.east.isActive),
+          west: !!(sq.west && sq.west.isActive)
+        });
+      }
+      layout.push(row);
+    }
+    return {
+      num_of_rows: this.num_of_rows,
+      num_of_columns: this.num_of_columns,
+      wall_thiccness: this.wall_thiccness,
+      squares: layout
+    };
+  }
+  function loadLayout(data) {
+    if (!data || !data.squares) {
+      return;
+    }
+    this.num_of_rows = data.num_of_rows || this.num_of_rows;
+    this.num_of_columns = data.num_of_columns || this.num_of_columns;
+    this.wall_thiccness = data.wall_thiccness || this.wall_thiccness;
+    for (var r = 0; r < this.squares.length && r < data.squares.length; r++) {
+      for (var c = 0; c < this.squares[r].length && c < data.squares[r].length; c++) {
+        var square = this.squares[r][c];
+        var src = data.squares[r][c] || {};
+        if (square.north) square.north.isActive = !!src.north;
+        if (square.south) square.south.isActive = !!src.south;
+        if (square.east) square.east.isActive = !!src.east;
+        if (square.west) square.west.isActive = !!src.west;
+      }
+    }
+  }
+  function serializeState() {
+    return this.captureState();
+  }
+  function captureState() {
+    var self = this;
+    var tanksState = this.tanks.map(function(tank, index) {
+      return self.cloneTankState({
+        id: tank.id || "tank-" + index,
+        colour: tank.colour,
+        ownerPeerId: tank.ownerPeerId,
+        x: tank.x,
+        y: tank.y,
+        rotation: tank.rotation,
+        score: tank.score,
+        is_dead: tank.is_dead,
+        width: tank.width,
+        height: tank.height,
+        bullets: tank.bullets.map(function(bullet) {
+          return { x: bullet.x, y: bullet.y, radius: bullet.radius, colour: tank.colour };
+        }),
+        powerups: tank.powerups.map(function(powerup) {
+          return powerup.serialize ? powerup.serialize() : {
+            name: powerup.name,
+            type: powerup.constructor && powerup.constructor.name ? powerup.constructor.name : powerup.name,
+            spriteId: powerup.img && powerup.img.id ? powerup.img.id : null
+          };
+        })
+      });
+    });
+    var boardPowerups = this.serializeBoardPowerups();
+    var bullets = [];
+    for (var bi = 0; bi < this.tanks.length; bi++) {
+      var bt = this.tanks[bi];
+      if (!bt || !Array.isArray(bt.bullets)) {
+        continue;
+      }
+      for (var bj = 0; bj < bt.bullets.length; bj++) {
+        var shot = bt.bullets[bj];
+        if (!shot) {
+          continue;
+        }
+        bullets.push({
+          x: shot.x,
+          y: shot.y,
+          vx: shot.direction && shot.direction.length ? shot.direction[0] : 0,
+          vy: shot.direction && shot.direction.length ? shot.direction[1] : 0,
+          colour: bt.colour || bt.color || "#000000",
+          radius: shot.radius || 1
+        });
+      }
+    }
+    var snapshot = {
+      message: this.message,
+      tanks: tanksState,
+      powerups: boardPowerups,
+      bullets,
+      events: this.consumePendingEvents ? this.consumePendingEvents() : []
+    };
+    try {
+      this.state.tanks = {};
+      for (var i = 0; i < tanksState.length; i++) {
+        var ts = tanksState[i];
+        this.state.tanks[ts.id] = {
+          id: ts.id,
+          x: ts.x,
+          y: ts.y,
+          rotation: ts.rotation,
+          width: ts.width,
+          height: ts.height,
+          colour: ts.colour,
+          score: ts.score,
+          is_dead: ts.is_dead,
+          powerups: (ts.powerups || []).map(function(p) {
+            return { type: p.type || p.name, spriteId: p.spriteId || null };
+          })
+        };
+      }
+      this.state.bullets = bullets.slice();
+    } catch (_) {
+    }
+    return snapshot;
+  }
+  function serializeBoardPowerups() {
+    var list = [];
+    for (var i = 0; i < this.powerups.length; i++) {
+      var powerup = this.powerups[i];
+      if (!powerup) {
+        continue;
+      }
+      if (!powerup.id) {
+        powerup.id = "powerup-" + this.nextPowerupId++;
+      }
+      list.push({
+        id: powerup.id,
+        type: powerup.constructor && powerup.constructor.name ? powerup.constructor.name : powerup.name,
+        name: powerup.name,
+        x: powerup.x,
+        y: powerup.y,
+        width: powerup.width,
+        height: powerup.height,
+        spriteId: powerup.img && powerup.img.id ? powerup.img.id : null,
+        color: powerup.color || "#ffffff"
+      });
+      try {
+        this.state && (this.state.powerups[powerup.id] = {
+          id: powerup.id,
+          type: list[list.length - 1].type,
+          x: powerup.x,
+          y: powerup.y,
+          width: powerup.width,
+          height: powerup.height
+        });
+      } catch (_) {
+      }
+    }
+    return list;
+  }
+  function cloneTankState(tankState) {
+    return JSON.parse(JSON.stringify(tankState));
+  }
+  function clonePowerupState(powerupState) {
+    return JSON.parse(JSON.stringify(powerupState));
+  }
+  function clonePowerupList(list) {
+    var self = this;
+    var source = Array.isArray(list) ? list : [];
+    return source.map(function(powerup) {
+      return self.clonePowerupState(powerup);
+    });
+  }
+  function cloneSnapshot(snapshot) {
+    if (!snapshot) {
+      return { message: "", tanks: [], powerups: [], events: [] };
+    }
+    var self = this;
+    var tanks = Array.isArray(snapshot.tanks) ? snapshot.tanks : [];
+    return {
+      message: snapshot.message,
+      tanks: tanks.map(function(tank) {
+        return self.cloneTankState(tank);
+      }),
+      powerups: self.clonePowerupList(snapshot.powerups),
+      events: []
+    };
+  }
+  function collectRemoteTankMeta() {
+    var list = [];
+    if (!this.remoteTankMap) {
+      return list;
+    }
+    for (var id in this.remoteTankMap) {
+      if (Object.prototype.hasOwnProperty.call(this.remoteTankMap, id)) {
+        list.push(this.remoteTankMap[id]);
+      }
+    }
+    return list;
+  }
+  function buildStatePacket() {
+    var current = this.captureState();
+    var packet = null;
+    if (!this.lastSnapshot) {
+      packet = { type: "state-init", state: current };
+    } else {
+      var delta = this.diffSnapshots(this.lastSnapshot, current);
+      if (delta) {
+        packet = { type: "state-delta", delta };
+      }
+    }
+    this.lastSnapshot = this.cloneSnapshot(current);
+    return packet;
+  }
+  function buildUnifiedDeltaPacket() {
+    try {
+      var prev = this._lastUnifiedState || { tanks: {}, powerups: {}, bullets: [] };
+      var json = this.serializeUnifiedDelta(prev);
+      this._lastUnifiedState = JSON.parse(this.serializeUnifiedSnapshot());
+      if (!json) {
+        return null;
+      }
+      return "V," + json;
+    } catch (_) {
+      return null;
+    }
+  }
+  function serializeUnifiedSnapshot() {
+    try {
+      return JSON.stringify({
+        tanks: this.state.tanks || {},
+        powerups: this.state.powerups || {},
+        bullets: this.state.bullets || []
+      });
+    } catch (_) {
+      return "{}";
+    }
+  }
+  function applyUnifiedSnapshot(json) {
+    try {
+      var obj = typeof json === "string" ? JSON.parse(json) : json || {};
+      this.state.tanks = obj.tanks || {};
+      this.state.powerups = obj.powerups || {};
+      this.state.bullets = Array.isArray(obj.bullets) ? obj.bullets.slice() : [];
+      this.remoteTankMap = {};
+      for (var id in this.state.tanks) {
+        if (!Object.prototype.hasOwnProperty.call(this.state.tanks, id)) {
+          continue;
+        }
+        this.remoteTankMap[id] = this.state.tanks[id];
+      }
+      this.remoteTankMeta = this.collectRemoteTankMeta();
+      this.remoteGlobalBullets = Array.isArray(this.state.bullets) ? this.state.bullets.slice() : [];
+      this.remoteTankLerpStates = {};
+      if (this.remoteTankMeta.length && typeof this._primeRemoteLerpTargets === "function") {
+        var ids = this.remoteTankMeta.map(function(entry) {
+          return entry && entry.id;
+        }).filter(Boolean);
+        this._primeRemoteLerpTargets(ids);
+      }
+      var powerupList = Object.keys(this.state.powerups || {}).map((pid) => this.state.powerups[pid]);
+      this.remoteState = { tanks: this.remoteTankMeta, powerups: powerupList };
+      if (typeof this.recomputeGlobalPowerups === "function") {
+        this.recomputeGlobalPowerups();
+      }
+    } catch (_) {
+    }
+  }
+  function serializeUnifiedDelta(prev) {
+    var delta = { tanks: { set: {}, del: [] }, powerups: { set: {}, del: [] } };
+    var touched = false;
+    try {
+      var pt = prev && prev.tanks || {};
+      var ct = this.state.tanks || {};
+      for (var id in ct) {
+        if (!Object.prototype.hasOwnProperty.call(ct, id)) {
+          continue;
+        }
+        var a = JSON.stringify(pt[id] || null);
+        var b = JSON.stringify(ct[id]);
+        if (a !== b) {
+          delta.tanks.set[id] = ct[id];
+          touched = true;
+        }
+      }
+      for (var id2 in pt) {
+        if (!Object.prototype.hasOwnProperty.call(pt, id2)) {
+          continue;
+        }
+        if (!Object.prototype.hasOwnProperty.call(ct, id2)) {
+          delta.tanks.del.push(id2);
+          touched = true;
+        }
+      }
+      var pp = prev && prev.powerups || {};
+      var cp = this.state.powerups || {};
+      for (var pid in cp) {
+        if (!Object.prototype.hasOwnProperty.call(cp, pid)) {
+          continue;
+        }
+        var pa = JSON.stringify(pp[pid] || null);
+        var pb = JSON.stringify(cp[pid]);
+        if (pa !== pb) {
+          delta.powerups.set[pid] = cp[pid];
+          touched = true;
+        }
+      }
+      for (var pid2 in pp) {
+        if (!Object.prototype.hasOwnProperty.call(pp, pid2)) {
+          continue;
+        }
+        if (!Object.prototype.hasOwnProperty.call(cp, pid2)) {
+          delta.powerups.del.push(pid2);
+          touched = true;
+        }
+      }
+      var prevBullets = Array.isArray(prev && prev.bullets) ? prev.bullets : [];
+      var currBullets = Array.isArray(this.state.bullets) ? this.state.bullets : [];
+      if (this.haveBulletsChanged(prevBullets, currBullets)) {
+        delta.bullets = currBullets.slice();
+        touched = true;
+      }
+    } catch (_) {
+    }
+    if (!touched) {
+      return null;
+    }
+    return JSON.stringify(delta);
+  }
+  function applyUnifiedDelta(json) {
+    try {
+      var data = typeof json === "string" ? JSON.parse(json) : json || {};
+      var ts = data.tanks || {};
+      var ps = data.powerups || {};
+      var updatedTankIds = [];
+      this.state.tanks = this.state.tanks || {};
+      (ts.del || []).forEach((id2) => {
+        delete this.state.tanks[id2];
+        delete this.remoteTankMap[id2];
+        if (this.remoteTankLerpStates) {
+          delete this.remoteTankLerpStates[id2];
+        }
+      });
+      var setT = ts.set || {};
+      for (var id in setT) {
+        if (!Object.prototype.hasOwnProperty.call(setT, id)) {
+          continue;
+        }
+        this.state.tanks[id] = setT[id];
+        this.remoteTankMap[id] = setT[id];
+        updatedTankIds.push(id);
+      }
+      this.state.powerups = this.state.powerups || {};
+      (ps.del || []).forEach((pid2) => {
+        delete this.state.powerups[pid2];
+      });
+      var setP = ps.set || {};
+      for (var pid in setP) {
+        if (!Object.prototype.hasOwnProperty.call(setP, pid)) {
+          continue;
+        }
+        this.state.powerups[pid] = setP[pid];
+      }
+      if (Array.isArray(data.bullets)) {
+        this.state.bullets = data.bullets.slice();
+        this.remoteGlobalBullets = data.bullets.slice();
+      }
+      this.remoteTankMeta = this.collectRemoteTankMeta();
+      var powerupList = Object.keys(this.state.powerups).map((pid2) => this.state.powerups[pid2]);
+      this.remoteState = { tanks: this.remoteTankMeta, powerups: powerupList };
+      if (updatedTankIds.length && typeof this._primeRemoteLerpTargets === "function") {
+        this._primeRemoteLerpTargets(updatedTankIds);
+      }
+      if (typeof this.recomputeGlobalPowerups === "function") {
+        this.recomputeGlobalPowerups();
+      }
+    } catch (_) {
+    }
+  }
+  function serializeInitString() {
+    var s = this.settings || {};
+    var rows = this.num_of_rows || s.num_of_rows || 0;
+    var cols = this.num_of_columns || s.num_of_columns || 0;
+    var wall = this.wall_thiccness || s.wall_thiccness || 0;
+    var mv = +(s.move_speed != null ? s.move_speed : 0);
+    var rv = +(s.rotation_speed != null ? s.rotation_speed : 0);
+    var bv = +(s.bullet_speed != null ? s.bullet_speed : 0);
+    var bl = +(s.bullet_limit != null ? s.bullet_limit : 0);
+    var bo = +(s.bounce_limit != null ? s.bounce_limit : 0);
+    var pi = +(s.powerup_interval != null ? s.powerup_interval : 0);
+    var pl = +(s.powerup_limit != null ? s.powerup_limit : 0);
+    var pd = +(s.powerup_duration != null ? s.powerup_duration : 0);
+    var ff = s.friendly_fire ? 1 : 0;
+    var layoutObj = this.serializeLayout ? this.serializeLayout() : null;
+    var layoutStr = layoutObj ? btoa(unescape(encodeURIComponent(JSON.stringify(layoutObj)))) : "";
+    var powerupBlocks = (this.powerups || []).map(function(p) {
+      if (!p) {
+        return "";
+      }
+      var x = Math.round(p.x) || 0;
+      var y = Math.round(p.y) || 0;
+      var w = Math.round(p.width) || 0;
+      var h = Math.round(p.height) || 0;
+      var sid = p.img && p.img.id ? p.img.id : "";
+      var c = (p.color || "").replace(/[,|;]/g, "");
+      return [x, y, w, h, sid, c].join("|");
+    }).filter(Boolean).join(";");
+    var tankBlocks = (this.tanks || []).map(function(t, index) {
+      if (!t) {
+        return "";
+      }
+      var id = t.id || "tank-" + index;
+      var x = Math.round(t.x) || 0;
+      var y = Math.round(t.y) || 0;
+      var r = +(t.rotation || 0).toFixed(4);
+      var w = Math.round(t.width) || 0;
+      var h = Math.round(t.height) || 0;
+      var c = (t.colour || "").replace(/[,|;]/g, "");
+      var score = +(t.score || 0);
+      return [id, x, y, r, w, h, c, score].join("|");
+    }).filter(Boolean).join(";");
+    return ["I", rows, cols, wall, mv, rv, bv, bl, bo, pi, pl, pd, ff, layoutStr, powerupBlocks, tankBlocks].join(",");
+  }
+  function serializeDeltaString() {
+    var tanks = (this.tanks || []).map(function(t, index) {
+      if (!t) {
+        return "";
+      }
+      var id2 = t.id || "tank-" + index;
+      var x = Math.round(t.x) || 0;
+      var y = Math.round(t.y) || 0;
+      var r = +(t.rotation || 0).toFixed(4);
+      var score = +(t.score || 0);
+      var alive = t.is_dead ? 0 : 1;
+      return [id2, x, y, r, score, alive].join("|");
+    }).filter(Boolean).join(";");
+    var bullets = [];
+    (this.tanks || []).forEach(function(t) {
+      (t.bullets || []).forEach(function(b) {
+        var vx = +(b.direction && b.direction[0] || 0).toFixed(3);
+        var vy = +(b.direction && b.direction[1] || 0).toFixed(3);
+        var col = (t.colour || "").replace(/[,|;]/g, "");
+        var rad = Math.round(b.radius || 1);
+        bullets.push([Math.round(b.x) || 0, Math.round(b.y) || 0, vx, vy, col, rad].join("|"));
+      });
+    });
+    var powerups = (this.powerups || []).map(function(p2) {
+      if (!p2) {
+        return "";
+      }
+      var x = Math.round(p2.x) || 0;
+      var y = Math.round(p2.y) || 0;
+      var w = Math.round(p2.width) || 0;
+      var h = Math.round(p2.height) || 0;
+      var sid = p2.img && p2.img.id ? p2.img.id : "";
+      var c = (p2.color || "").replace(/[,|;]/g, "");
+      return [x, y, w, h, sid, c].join("|");
+    }).filter(Boolean).join(";");
+    var evts = this.consumePendingEvents();
+    var events = "";
+    if (evts && evts.length) {
+      var partsE = [];
+      for (var ei = 0; ei < evts.length; ei++) {
+        var e = evts[ei];
+        if (!e) {
+          continue;
+        }
+        var p = (e.powerup || "").replace(/[,|;]/g, "");
+        var status = (e.status || "").replace(/[,|;]/g, "");
+        var target = (e.target || "").replace(/[,|;]/g, "");
+        var id = (e.tankId || "").replace(/[,|;]/g, "");
+        partsE.push([p, status, target, id].join("|"));
+      }
+      events = partsE.join(";");
+    }
+    return ["D", tanks, bullets.join(";"), powerups, events].join(",");
+  }
+  function applyInitString(str) {
+    if (typeof str !== "string" || !str || str[0] !== "I") {
+      return;
+    }
+    var parts = str.split(",");
+    var toInt = function(v) {
+      var n = parseInt(v, 10);
+      return isNaN(n) ? 0 : n;
+    };
+    var toNum = function(v) {
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : n;
+    };
+    this.num_of_rows = toInt(parts[1]);
+    this.num_of_columns = toInt(parts[2]);
+    this.wall_thiccness = toInt(parts[3]);
+    this.settings.move_speed = toNum(parts[4]);
+    this.settings.rotation_speed = toNum(parts[5]);
+    this.settings.bullet_speed = toNum(parts[6]);
+    this.settings.bullet_limit = toInt(parts[7]);
+    this.settings.bounce_limit = toInt(parts[8]);
+    this.settings.powerup_interval = toNum(parts[9]);
+    this.settings.powerup_limit = toInt(parts[10]);
+    this.settings.powerup_duration = toNum(parts[11]);
+    this.settings.friendly_fire = parts[12] === "1";
+    var layoutObj = null;
+    try {
+      var layoutToken = parts[13] || "";
+      if (layoutToken) {
+        var json = decodeURIComponent(escape(atob(layoutToken)));
+        layoutObj = JSON.parse(json);
+      }
+    } catch (e) {
+      layoutObj = null;
+    }
+    this._buildGridEdges();
+    this.squares = [];
+    for (var r = 0; r < this.num_of_rows; r++) {
+      var row = [];
+      for (var c = 0; c < this.num_of_columns; c++) {
+        row.push(new Square(this, r, c));
+      }
+      this.squares.push(row);
+    }
+    this._initWalls();
+    if (layoutObj && layoutObj.squares && this.loadLayout) {
+      this.loadLayout(layoutObj);
+    }
+    this.remotePowerups = [];
+    var pBlock = parts[14] || "";
+    if (pBlock) {
+      var pEntries = pBlock.split(";");
+      for (var pi = 0; pi < pEntries.length; pi++) {
+        var tok = pEntries[pi];
+        if (!tok) {
+          continue;
+        }
+        var f = tok.split("|");
+        this.remotePowerups.push({
+          x: parseInt(f[0], 10) || 0,
+          y: parseInt(f[1], 10) || 0,
+          width: parseInt(f[2], 10) || 0,
+          height: parseInt(f[3], 10) || 0,
+          spriteId: f[4] || "",
+          color: f[5] || "#ffffff"
+        });
+      }
+    }
+    this.remoteTankMap = {};
+    var tankBlock = parts[15] || "";
+    if (tankBlock) {
+      var entries = tankBlock.split(";");
+      for (var i = 0; i < entries.length; i++) {
+        var tok = entries[i];
+        if (!tok) {
+          continue;
+        }
+        var f = tok.split("|");
+        var id = f[0];
+        this.remoteTankMap[id] = {
+          id,
+          x: toInt(f[1]),
+          y: toInt(f[2]),
+          rotation: toNum(f[3]),
+          width: toInt(f[4]),
+          height: toInt(f[5]),
+          colour: f[6] || "#ffffff",
+          score: toInt(f[7])
+        };
+      }
+    }
+    this.remoteTankMeta = this.collectRemoteTankMeta();
+    this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
+    if (this.recomputeGlobalPowerups) {
+      this.recomputeGlobalPowerups();
+    }
+    this.prerenderBackground();
+    this.message = "Awaiting host updates...";
+  }
+  function applyDeltaString(str) {
+    if (typeof str !== "string" || !str || str[0] !== "D") {
+      return;
+    }
+    var parts = str.split(",");
+    var toInt = function(v) {
+      var n = parseInt(v, 10);
+      return isNaN(n) ? 0 : n;
+    };
+    var toNum = function(v) {
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : n;
+    };
+    var base = 1;
+    if (parts.length >= 6) {
+      base = 2;
+    }
+    var updatedTankIds = [];
+    var tankBlock = parts[base] || "";
+    if (tankBlock) {
+      var entries = tankBlock.split(";");
+      for (var i = 0; i < entries.length; i++) {
+        var tok = entries[i];
+        if (!tok) {
+          continue;
+        }
+        var f = tok.split("|");
+        var id = f[0];
+        var existing = this.remoteTankMap && this.remoteTankMap[id] ? this.remoteTankMap[id] : { id };
+        existing.x = toInt(f[1]);
+        existing.y = toInt(f[2]);
+        existing.rotation = toNum(f[3]);
+        existing.score = toInt(f[4]);
+        if (f.length > 5 && f[5] !== "") {
+          var aliveFlag = toInt(f[5]);
+          existing.is_dead = aliveFlag === 0;
+        } else if (typeof existing.is_dead !== "boolean") {
+          existing.is_dead = false;
+        }
+        this.remoteTankMap[id] = existing;
+        updatedTankIds.push(id);
+      }
+    }
+    this.remoteTankMeta = this.collectRemoteTankMeta();
+    try {
+      if (this.settings && this.settings.friendly_fire) {
+        var tanksArr = this.remoteTankMeta || [];
+        var bulletsArr = this.remoteGlobalBullets || [];
+        for (var ti = 0; ti < tanksArr.length; ti++) {
+          var rt = tanksArr[ti];
+          if (!rt || rt.is_dead) {
+            continue;
+          }
+          var tx = rt.x;
+          var ty = rt.y;
+          var tw = rt.width || this.width / this.num_of_columns / 3;
+          var th = rt.height || this.height / this.num_of_rows / 3;
+          for (var bi = 0; bi < bulletsArr.length; bi++) {
+            var rb = bulletsArr[bi];
+            if (!rb) {
+              continue;
+            }
+            if (rb.colour && rt.colour && rb.colour === rt.colour) {
+              continue;
+            }
+            var br = rb.radius || 1;
+            var bx0 = rb.x - br;
+            var by0 = rb.y - br;
+            var bw = br * 2;
+            var bh = br * 2;
+            if (doRectsOverlap([tx, ty, tw, th], [bx0, by0, bw, bh])) {
+              rt.is_dead = true;
+              var mt = this.remoteTankMap && this.remoteTankMap[rt.id];
+              if (mt) {
+                mt.is_dead = true;
+              }
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+    }
+    var bulletBlock = parts[base + 1] || "";
+    var bullets = [];
+    if (bulletBlock) {
+      var bEntries = bulletBlock.split(";");
+      for (var j = 0; j < bEntries.length; j++) {
+        var b = bEntries[j];
+        if (!b) {
+          continue;
+        }
+        var bf = b.split("|");
+        bullets.push({
+          x: toInt(bf[0]),
+          y: toInt(bf[1]),
+          vx: toNum(bf[2]),
+          vy: toNum(bf[3]),
+          colour: bf[4] || "#000000",
+          radius: toInt(bf[5]) || 1
+        });
+      }
+    }
+    this.remoteGlobalBullets = bullets;
+    this.state.bullets = bullets.slice();
+    var newPowerups = [];
+    var pBlockDelta = parts[base + 2] || "";
+    if (pBlockDelta) {
+      var entriesP = pBlockDelta.split(";");
+      for (var k = 0; k < entriesP.length; k++) {
+        var tk = entriesP[k];
+        if (!tk) {
+          continue;
+        }
+        var pf = tk.split("|");
+        newPowerups.push({
+          x: toInt(pf[0]),
+          y: toInt(pf[1]),
+          width: toInt(pf[2]),
+          height: toInt(pf[3]),
+          spriteId: pf[4] || "",
+          color: pf[5] || "#ffffff"
+        });
+      }
+    }
+    this.remotePowerups = newPowerups;
+    this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
+    if (updatedTankIds.length && typeof this._primeRemoteLerpTargets === "function") {
+      this._primeRemoteLerpTargets(updatedTankIds);
+    }
+    var eventsBlock = parts[base + 3] || "";
+    if (eventsBlock) {
+      var entriesE = eventsBlock.split(";");
+      for (var eIdx = 0; eIdx < entriesE.length; eIdx++) {
+        var ek = entriesE[eIdx];
+        if (!ek) {
+          continue;
+        }
+        var ef = ek.split("|");
+        var evt = {
+          type: "powerup",
+          powerup: ef[0] || "",
+          status: ef[1] || "",
+          target: ef[2] || "",
+          tankId: ef[3] || ""
+        };
+        this.applyPowerupEvent(evt);
+      }
+    }
+  }
+  function diffSnapshots(prev, curr) {
+    prev = prev || {};
+    curr = curr || {};
+    var delta = {};
+    var prevTanks = Array.isArray(prev.tanks) ? prev.tanks : [];
+    var currTanks = Array.isArray(curr.tanks) ? curr.tanks : [];
+    var prevPowerups = Array.isArray(prev.powerups) ? prev.powerups : [];
+    var currPowerups = Array.isArray(curr.powerups) ? curr.powerups : [];
+    if (curr.message !== prev.message) {
+      delta.message = curr.message;
+    }
+    var changedTanks = [];
+    var prevMap = {};
+    var currMap = {};
+    prevTanks.forEach(function(tank, index) {
+      if (!tank) {
+        return;
+      }
+      var prevId2 = tank.id ? tank.id : "tank-" + index;
+      prevMap[prevId2] = tank;
+    });
+    currTanks.forEach(function(tank, index) {
+      if (!tank) {
+        return;
+      }
+      var currId = tank.id ? tank.id : "tank-" + index;
+      currMap[currId] = tank;
+    });
+    var self = this;
+    for (var id in currMap) {
+      var newTank = currMap[id];
+      var oldTank = prevMap[id];
+      if (!oldTank || self.hasTankChanged(oldTank, newTank)) {
+        changedTanks.push(newTank);
+      }
+    }
+    if (changedTanks.length) {
+      delta.tanks = changedTanks;
+    }
+    var removed = [];
+    for (var prevId in prevMap) {
+      if (!currMap[prevId]) {
+        removed.push(prevId);
+      }
+    }
+    if (removed.length) {
+      delta.removedTanks = removed;
+    }
+    if (this.haveBoardPowerupsChanged(prevPowerups, currPowerups)) {
+      delta.powerups = this.clonePowerupList(currPowerups);
+    }
+    var currEvents = Array.isArray(curr.events) ? curr.events : [];
+    if (currEvents.length) {
+      delta.events = currEvents;
+    }
+    return Object.keys(delta).length ? delta : null;
+  }
+  function hasTankChanged(prevTank, newTank) {
+    if (!prevTank || !newTank) {
+      return prevTank !== newTank;
+    }
+    if (prevTank.x !== newTank.x || prevTank.y !== newTank.y) {
+      return true;
+    }
+    if (prevTank.rotation !== newTank.rotation) {
+      return true;
+    }
+    if (prevTank.colour !== newTank.colour) {
+      return true;
+    }
+    if (prevTank.ownerPeerId !== newTank.ownerPeerId) {
+      return true;
+    }
+    if (prevTank.width !== newTank.width || prevTank.height !== newTank.height) {
+      return true;
+    }
+    if (prevTank.score !== newTank.score) {
+      return true;
+    }
+    if (!!prevTank.is_dead !== !!newTank.is_dead) {
+      return true;
+    }
+    if (this.haveBulletsChanged(prevTank.bullets, newTank.bullets)) {
+      return true;
+    }
+    if (this.havePowerupsChanged(prevTank.powerups, newTank.powerups)) {
+      return true;
+    }
+    return false;
+  }
+  function haveBulletsChanged(prevBullets, newBullets) {
+    prevBullets = prevBullets || [];
+    newBullets = newBullets || [];
+    if (prevBullets.length !== newBullets.length) {
+      return true;
+    }
+    for (var i = 0; i < prevBullets.length; i++) {
+      var a = prevBullets[i];
+      var b = newBullets[i];
+      if (!a || !b) {
+        return true;
+      }
+      if (a.x !== b.x || a.y !== b.y || a.radius !== b.radius) {
+        return true;
+      }
+      if ((a.vx || 0) !== (b.vx || 0) || (a.vy || 0) !== (b.vy || 0)) {
+        return true;
+      }
+      if ((a.colour || a.color || "") !== (b.colour || b.color || "")) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function recomputeGlobalPowerups() {
+    try {
+      var meta = this.remoteTankMeta || [];
+      var hasTrippy = 0;
+      for (var i = 0; i < meta.length; i++) {
+        var t = meta[i];
+        if (!t || !t.powerups) {
+          continue;
+        }
+        for (var j = 0; j < t.powerups.length; j++) {
+          var pu = t.powerups[j];
+          var nm = (pu && (pu.type || pu.name || "")) + "";
+          if (/Trippy/i.test(nm)) {
+            hasTrippy++;
+            break;
+          }
+        }
+      }
+      this.trippyCount = hasTrippy;
+    } catch (_) {
+    }
+  }
+  var syncGlobalPowerups = recomputeGlobalPowerups;
+  function havePowerupsChanged(prevPowerups, newPowerups) {
+    prevPowerups = prevPowerups || [];
+    newPowerups = newPowerups || [];
+    if (prevPowerups.length !== newPowerups.length) {
+      return true;
+    }
+    for (var i = 0; i < prevPowerups.length; i++) {
+      var a = prevPowerups[i];
+      var b = newPowerups[i];
+      if ((a && a.type) !== (b && b.type)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function haveBoardPowerupsChanged(prevPowerups, newPowerups) {
+    prevPowerups = Array.isArray(prevPowerups) ? prevPowerups : [];
+    newPowerups = Array.isArray(newPowerups) ? newPowerups : [];
+    if (prevPowerups.length !== newPowerups.length) {
+      return true;
+    }
+    var prevMap = {};
+    prevPowerups.forEach(function(powerup2, index) {
+      if (!powerup2) {
+        return;
+      }
+      var id2 = powerup2.id || "powerup-" + index;
+      prevMap[id2] = powerup2;
+    });
+    for (var i = 0; i < newPowerups.length; i++) {
+      var powerup = newPowerups[i];
+      if (!powerup) {
+        return true;
+      }
+      var id = powerup.id || "powerup-" + i;
+      var prevEntry = prevMap[id];
+      if (!prevEntry) {
+        return true;
+      }
+      if (prevEntry.x !== powerup.x || prevEntry.y !== powerup.y) {
+        return true;
+      }
+      if (prevEntry.width !== powerup.width || prevEntry.height !== powerup.height) {
+        return true;
+      }
+      if ((prevEntry.spriteId || null) !== (powerup.spriteId || null)) {
+        return true;
+      }
+      if ((prevEntry.type || null) !== (powerup.type || null)) {
+        return true;
+      }
+      if ((prevEntry.color || null) !== (powerup.color || null)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function getCachedSnapshot() {
+    if (this.lastSnapshot) {
+      return this.cloneSnapshot(this.lastSnapshot);
+    }
+    var snapshot = this.captureState();
+    this.lastSnapshot = this.cloneSnapshot(snapshot);
+    return snapshot;
+  }
+
   // js/maze/Maze.js
+  var MAZE_DEFAULT_SETTINGS = Object.freeze({
+    num_of_rows: 6,
+    num_of_columns: 9,
+    wall_thiccness: 4,
+    speed: 1,
+    move_speed: 3,
+    rotation_speed: 9 / 100,
+    bullet_speed: 3,
+    seconds_between_rounds: 3,
+    friendly_fire: false,
+    bullet_limit: 7,
+    bounce_limit: 7,
+    powerup_interval: 8,
+    powerup_limit: 8,
+    powerup_duration: 10
+  });
   var Maze = class {
     constructor(game2, settings) {
       this.game = game2;
-      const defaultSettings = {
-        num_of_rows: 6,
-        num_of_columns: 9,
-        wall_thiccness: 4,
-        speed: 1,
-        move_speed: 3,
-        rotation_speed: 9 / 100,
-        bullet_speed: 3,
-        seconds_between_rounds: 3,
-        friendly_fire: false,
-        bullet_limit: 7,
-        bounce_limit: 7,
-        powerup_interval: 8,
-        powerup_limit: 8,
-        powerup_duration: 10
-      };
-      this.settings = Object.assign({}, defaultSettings, settings || {});
+      this.settings = Object.assign({}, MAZE_DEFAULT_SETTINGS, settings || {});
       this.num_of_rows = this.settings.num_of_rows;
       this.num_of_columns = this.settings.num_of_columns;
       this.wall_thiccness = this.settings.wall_thiccness;
@@ -2885,37 +4429,8 @@
       this.width = canvas.width - this.wall_thiccness;
       this.height = canvas.height - this.scoreboardHeight - this.wall_thiccness;
       this._buildGridEdges();
-      this.tanks = [];
-      this.powerups = [];
-      this.state = {
-        tanks: {},
-        // id -> { id, x, y, rotation, colour, width, height, score, is_dead, powerups: [{type,spriteId?}] }
-        powerups: {},
-        // id -> { id, type, x, y, width, height }
-        meta: { nextPowerupId: 1, nextTankId: 1 }
-      };
-      this.pendingPowerupEvents = [];
-      this.teleportMirrors = {};
-      this.lastSnapshot = null;
-      this.message = "Shoot the opposing tanks!";
-      this.num_of_destroyed_tanks = 0;
-      this.spectator = false;
-      this.remoteState = null;
-      this.remoteTankMeta = [];
-      this.remoteTankMap = {};
-      this.remotePowerups = [];
-      this.remoteBulletCache = {};
-      this.remoteBulletLerpDuration = 60;
-      this.remoteBulletPredictionWindow = 120;
-      this.remoteGlobalBullets = [];
-      this.remoteInterpolation = null;
-      this.nextPowerupId = 1;
-      this.nextTankId = 1;
-      this.tankById = {};
-      this.lastStateBroadcast = 0;
-      this.lastRemoteStateTime = 0;
-      this.hostOwned = false;
-      this.tick = 0;
+      this._initializeSessionState();
+      this.resetRoundState();
       this.squares = [];
       for (var r = 0; r < this.num_of_rows; r++) {
         var row = [];
@@ -2927,6 +4442,97 @@
       this._initWalls();
       this.extraFunctionsPerCycle = [];
       this.trippyCount = 0;
+      this.renderer = new MazeRenderer_default(this);
+    }
+    _initializeSessionState() {
+      this.tanks = [];
+      this.powerups = [];
+      this.state = {
+        tanks: {},
+        powerups: {},
+        bullets: [],
+        meta: { nextPowerupId: 1, nextTankId: 1 }
+      };
+      this.pendingPowerupEvents = [];
+      this.teleportMirrors = {};
+      this.lastSnapshot = null;
+      this._lastUnifiedState = { tanks: {}, powerups: {}, bullets: [] };
+      this.message = "";
+      this.num_of_destroyed_tanks = 0;
+      this.spectator = false;
+      this.remoteState = null;
+      this.remoteTankMeta = [];
+      this.remoteTankMap = {};
+      this.remotePowerups = [];
+      this.remoteGlobalBullets = [];
+      this.remoteTankLerpStates = {};
+      this.remoteTankLerpDuration = 32;
+      this.remoteBulletCache = {};
+      this.remoteBulletLerpDuration = 60;
+      this.remoteBulletPredictionWindow = 120;
+      this.nextPowerupId = 1;
+      this.nextTankId = 1;
+      this.tankById = {};
+      this.lastStateBroadcast = 0;
+      this.lastRemoteStateTime = 0;
+      this.hostOwned = false;
+      this.tick = 0;
+      this.extraFunctionsPerCycle = [];
+      this.trippyCount = 0;
+      this._lastFullSyncTime = 0;
+      if (!this._fullResyncIntervalMs) {
+        this._fullResyncIntervalMs = 1e3;
+      }
+    }
+    resetRoundState(message) {
+      var newMessage = typeof message === "string" ? message : "Shoot the opposing tanks!";
+      this.message = newMessage;
+      this.num_of_destroyed_tanks = 0;
+      this.pendingPowerupEvents = [];
+      this.teleportMirrors = {};
+      this.lastSnapshot = null;
+      this.extraFunctionsPerCycle = [];
+      this.trippyCount = 0;
+      this.clearBoardPowerups();
+      this._lastFullSyncTime = 0;
+      if (this.state) {
+        this.state.bullets = [];
+      }
+      this.remoteGlobalBullets = [];
+      this.remoteTankLerpStates = {};
+      this._lastUnifiedState = { tanks: {}, powerups: {}, bullets: [] };
+    }
+    clearBoardPowerups() {
+      if (!Array.isArray(this.powerups) || this.powerups.length === 0) {
+        if (this.state && this.state.powerups) {
+          this.state.powerups = {};
+        }
+        return;
+      }
+      for (var i = 0; i < this.powerups.length; i++) {
+        var powerup = this.powerups[i];
+        if (!powerup) {
+          continue;
+        }
+        try {
+          if (powerup.timeout) {
+            clearTimeout(powerup.timeout);
+            powerup.timeout = null;
+          }
+        } catch (_) {
+        }
+        try {
+          powerup.tank = null;
+        } catch (_) {
+        }
+      }
+      this.powerups = [];
+      if (this.state && this.state.powerups) {
+        this.state.powerups = {};
+        if (this.state.meta) {
+          this.state.meta.nextPowerupId = this.nextPowerupId;
+        }
+      }
     }
     // Build integer-aligned edges for rows and columns
     _buildGridEdges() {
@@ -2946,6 +4552,31 @@
         var addH = baseH + (r < remH ? 1 : 0);
         this._rowY.push(this._rowY[r] + addH);
       }
+    }
+    _getGridRange(bounds, start, end) {
+      if (!Array.isArray(bounds) || bounds.length < 2) {
+        return [];
+      }
+      var clampedStart = Math.max(0, start);
+      var clampedEnd = Math.min(end, bounds[bounds.length - 1]);
+      if (clampedEnd < clampedStart) {
+        var swap = clampedEnd;
+        clampedEnd = clampedStart;
+        clampedStart = swap;
+      }
+      var indices = [];
+      for (var i = 0; i < bounds.length - 1; i++) {
+        var cellStart = bounds[i];
+        var cellEnd = bounds[i + 1];
+        if (clampedEnd <= cellStart) {
+          break;
+        }
+        if (clampedStart >= cellEnd) {
+          continue;
+        }
+        indices.push(i);
+      }
+      return indices;
     }
     getCellRect(row, col) {
       var x0 = this._colX[col];
@@ -2967,41 +4598,10 @@
       this.broadcastState();
     }
     draw() {
-      if ((this.trippyCount || 0) > 0) {
-        this.drawScoreboardTop();
-        this.drawDynamicObjects();
-        return;
-      }
-      this.drawScoreboardTop();
-      this.drawBackground();
-      this.drawDynamicObjects();
+      this.renderer.drawFrame();
     }
     drawBackground() {
-      ctx.save();
-      if (typeof ctx.setTransform === "function") {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      }
-      var gy = this.scoreboardHeight;
-      var gh = canvas.height - gy;
-      ctx.clearRect(0, gy, canvas.width, gh);
-      ctx.translate(0, this.scoreboardHeight);
-      ctx.translate(this.wall_thiccness / 2, this.wall_thiccness / 2);
-      for (var ri = 0; ri < this.squares.length; ri++) {
-        var row = this.squares[ri];
-        for (var ci = 0; ci < row.length; ci++) {
-          var square = row[ci];
-          var fill = (square.row + square.col) % 2 == 0 ? "#C0C0C0" : "#E0E0E0";
-          ctx.fillStyle = fill;
-          ctx.fillRect(square.x, square.y, square.width, square.height);
-        }
-      }
-      ctx.fillStyle = "black";
-      for (var wi = 0; wi < this.walls.length; wi++) {
-        var w = this.walls[wi];
-        if (!w.isActive) continue;
-        ctx.fillRect(w.x, w.y, w.width, w.height);
-      }
-      ctx.restore();
+      this.renderer.drawBackground();
     }
     // Build the static background on the background canvas
     prerenderBackground() {
@@ -3056,26 +4656,7 @@
       }
     }
     drawDynamicObjects() {
-      try {
-        this._pruneStaleExtraFunctions();
-      } catch (_) {
-      }
-      ctx.save();
-      ctx.translate(0, this.scoreboardHeight);
-      ctx.translate(this.wall_thiccness / 2, this.wall_thiccness / 2);
-      this.tanks.forEach(function(tank) {
-        tank.draw();
-      });
-      this.powerups.forEach(function(powerup) {
-        powerup.draw();
-      });
-      this.extraFunctionsPerCycle.forEach(function(f) {
-        try {
-          f();
-        } catch (e) {
-        }
-      });
-      ctx.restore();
+      this.renderer.drawDynamicObjects();
     }
     _pruneStaleExtraFunctions() {
       if (!Array.isArray(this.extraFunctionsPerCycle) || this.extraFunctionsPerCycle.length === 0) {
@@ -3099,110 +4680,101 @@
       var wt = this.wall_thiccness;
       var half = wt / 2;
       this.walls = [];
-      this.intersections = [];
+      this.intersections = this._createIntersections();
+      this._buildWallStrip("vertical", wt, half);
+      this._buildWallStrip("horizontal", wt, half);
+    }
+    _createIntersections() {
+      var nodes = [];
       for (var r = 0; r <= this.num_of_rows; r++) {
         var rowNodes = [];
         for (var c = 0; c <= this.num_of_columns; c++) {
           rowNodes.push(new Intersection(this._colX[c], this._rowY[r]));
         }
-        this.intersections.push(rowNodes);
+        nodes.push(rowNodes);
       }
-      for (var c = 0; c <= this.num_of_columns; c++) {
-        for (var r = 0; r < this.num_of_rows; r++) {
-          var x = this._colX[c] - half;
-          var y = this._rowY[r] - half;
-          var h = this._rowY[r + 1] - this._rowY[r] + wt;
-          var wall = new Wall(x, y, wt, h, "vertical");
-          wall.N = this.intersections[r][c];
-          wall.S = this.intersections[r + 1][c];
-          if (c > 0) {
-            this.squares[r][c - 1].east = wall;
+      return nodes;
+    }
+    _buildWallStrip(orientation, thickness, halfThickness) {
+      var isVertical = orientation === "vertical";
+      var majorLimit = isVertical ? this.num_of_columns : this.num_of_rows;
+      var minorLimit = isVertical ? this.num_of_rows : this.num_of_columns;
+      var builder = isVertical ? this._createVerticalWall.bind(this) : this._createHorizontalWall.bind(this);
+      for (var major = 0; major <= majorLimit; major++) {
+        for (var minor = 0; minor < minorLimit; minor++) {
+          var wall = builder(major, minor, thickness, halfThickness);
+          if (wall) {
+            this.walls.push(wall);
           }
-          if (c < this.num_of_columns) {
-            this.squares[r][c] && (this.squares[r][c].west = wall);
-          }
-          if (!this.intersections[r][c].east) this.intersections[r][c].east = wall;
-          if (!this.intersections[r + 1][c].west) this.intersections[r + 1][c].west = wall;
-          this.walls.push(wall);
-        }
-      }
-      for (var r = 0; r <= this.num_of_rows; r++) {
-        for (var c = 0; c < this.num_of_columns; c++) {
-          var xh = this._colX[c] - half;
-          var yh = this._rowY[r] - half;
-          var w = this._colX[c + 1] - this._colX[c] + wt;
-          var wallh = new Wall(xh, yh, w, wt, "horizontal");
-          wallh.W = this.intersections[r][c];
-          wallh.E = this.intersections[r][c + 1];
-          if (r > 0) {
-            this.squares[r - 1][c].south = wallh;
-          }
-          if (r < this.num_of_rows) {
-            this.squares[r] && this.squares[r][c] && (this.squares[r][c].north = wallh);
-          }
-          if (!this.intersections[r][c].south) this.intersections[r][c].south = wallh;
-          if (!this.intersections[r][c + 1].north) this.intersections[r][c + 1].north = wallh;
-          this.walls.push(wallh);
         }
       }
     }
+    _createVerticalWall(columnIndex, rowIndex, thickness, halfThickness) {
+      var x = this._colX[columnIndex] - halfThickness;
+      var y = this._rowY[rowIndex] - halfThickness;
+      var height = this._rowY[rowIndex + 1] - this._rowY[rowIndex] + thickness;
+      var wall = new Wall(x, y, thickness, height, "vertical");
+      var northNode = this.intersections[rowIndex][columnIndex];
+      var southNode = this.intersections[rowIndex + 1][columnIndex];
+      wall.N = northNode;
+      wall.S = southNode;
+      if (columnIndex > 0 && this.squares[rowIndex] && this.squares[rowIndex][columnIndex - 1]) {
+        this.squares[rowIndex][columnIndex - 1].east = wall;
+      }
+      if (columnIndex < this.num_of_columns && this.squares[rowIndex] && this.squares[rowIndex][columnIndex]) {
+        this.squares[rowIndex][columnIndex].west = wall;
+      }
+      if (!northNode.east) {
+        northNode.east = wall;
+      }
+      if (!southNode.west) {
+        southNode.west = wall;
+      }
+      return wall;
+    }
+    _createHorizontalWall(rowIndex, columnIndex, thickness, halfThickness) {
+      var x = this._colX[columnIndex] - halfThickness;
+      var y = this._rowY[rowIndex] - halfThickness;
+      var width = this._colX[columnIndex + 1] - this._colX[columnIndex] + thickness;
+      var wall = new Wall(x, y, width, thickness, "horizontal");
+      var westNode = this.intersections[rowIndex][columnIndex];
+      var eastNode = this.intersections[rowIndex][columnIndex + 1];
+      wall.W = westNode;
+      wall.E = eastNode;
+      if (rowIndex > 0 && this.squares[rowIndex - 1] && this.squares[rowIndex - 1][columnIndex]) {
+        this.squares[rowIndex - 1][columnIndex].south = wall;
+      }
+      if (rowIndex < this.num_of_rows && this.squares[rowIndex] && this.squares[rowIndex][columnIndex]) {
+        this.squares[rowIndex][columnIndex].north = wall;
+      }
+      if (!westNode.south) {
+        westNode.south = wall;
+      }
+      if (!eastNode.north) {
+        eastNode.north = wall;
+      }
+      return wall;
+    }
     // New top scoreboard panel (HTML-based). Keep canvas area clear.
     drawScoreboardTop() {
-      if (typeof ctx.setTransform === "function") {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      }
-      var panelH = this.scoreboardHeight;
-      ctx.clearRect(0, 0, canvas.width, panelH);
-      this._gearBtnRect = null;
-      try {
-        layoutHudOverCanvas();
-        setHudScoreboardVisible(true);
-      } catch (_) {
-      }
-      var tanksSrc = this.spectator ? this.remoteTankMeta || [] : this.tanks || [];
-      var players = [];
-      for (var i = 0; i < tanksSrc.length; i++) {
-        var t = tanksSrc[i];
-        if (!t) {
-          continue;
-        }
-        var scoreVal = typeof t.score === "number" ? t.score : parseInt(t.score || "0", 10) || 0;
-        var iconId = null;
-        var powerupsList = t && Array.isArray(t.powerups) ? t.powerups : [];
-        for (var pi = 0; pi < powerupsList.length; pi++) {
-          var power = powerupsList[pi];
-          if (!power) {
-            continue;
-          }
-          if (!this.spectator && power.img && power.img.id) {
-            iconId = power.img.id;
-            break;
-          }
-          if (power.spriteId) {
-            iconId = power.spriteId;
-            break;
-          }
-        }
-        players.push({
-          id: t.id || "tank-" + (i + 1),
-          score: scoreVal,
-          powerupIconId: iconId || null
-        });
-      }
-      renderHudScoreboard({
-        players
-      });
+      this.renderer.drawScoreboardTop();
     }
     // Testing helper: remove interior walls and regenerate powerups
     testFlattenAndRegen() {
       try {
+        var shouldKeep = function() {
+          return Math.random() < 0.25;
+        };
         for (var r = 0; r < this.num_of_rows; r++) {
           for (var c = 0; c < this.num_of_columns; c++) {
             var sq = this.squares[r][c];
-            if (sq && sq.east) {
+            if (!sq) {
+              continue;
+            }
+            if (sq.east && sq.east.isActive && !shouldKeep()) {
               sq.east.isActive = false;
             }
-            if (sq && sq.south) {
+            if (sq.south && sq.south.isActive && !shouldKeep()) {
               sq.south.isActive = false;
             }
           }
@@ -3257,19 +4829,26 @@
       (this.walls || []).forEach(function(w) {
         w.isActive = true;
       });
-      var entry_square = this.squares[0][0];
-      this.visit(this.getRandomSquare(), this.getRandomSquare());
-    }
-    //Used in randomize. Visiting square b from a means removing the border between a-b and visiting all unvisited neighbours (in a random order). 
-    visit(old_square, new_square) {
-      old_square.removeBorder(new_square);
-      new_square.visited = true;
-      var neighbours = new_square.getNeighbours();
-      neighbours = shuffle(neighbours);
-      for (var i = 0; i < neighbours.length; i++) {
-        if (neighbours[i].visited == false) {
-          this.visit(new_square, neighbours[i]);
+      var start = this.getRandomSquare();
+      if (!start) {
+        return;
+      }
+      start.visited = true;
+      var stack = [start];
+      while (stack.length) {
+        var current = stack[stack.length - 1];
+        var neighbours = current.getNeighbours().filter(function(square) {
+          return !square.visited;
+        });
+        if (neighbours.length === 0) {
+          stack.pop();
+          continue;
         }
+        neighbours = shuffle(neighbours);
+        var next = neighbours[0];
+        current.removeBorder(next);
+        next.visited = true;
+        stack.push(next);
       }
     }
     getSquareAtXY(pos) {
@@ -3288,27 +4867,46 @@
     }
     //Check if a rectangle collides with (a wall in) the maze
     doesRectCollide(rect) {
-      if (this.isOutOfBounds([rect[0], rect[1]])) {
+      if (!Array.isArray(rect) || rect.length < 4) {
         return true;
       }
-      var square = this.getSquareAtXY([rect[0], rect[1]]);
-      if (!square) {
+      var startX = rect[0];
+      var startY = rect[1];
+      var endX = rect[0] + Math.max(0, rect[2]);
+      var endY = rect[1] + Math.max(0, rect[3]);
+      var edgeX = endX > startX ? endX - 1e-3 : endX;
+      var edgeY = endY > startY ? endY - 1e-3 : endY;
+      if (this.isOutOfBounds([startX, startY])) {
         return true;
       }
-      var nearby_squares = square.getNeighbours().concat([square]);
-      var nearby_walls = [];
-      nearby_squares.forEach(function(e) {
-        e.getWalls().forEach(function(el) {
-          nearby_walls.push(el);
-        });
-      });
-      var collides = false;
-      nearby_walls.forEach(function(e) {
-        if (doRectsOverlap(rect, e)) {
-          collides = true;
+      if (this.isOutOfBounds([edgeX, edgeY])) {
+        return true;
+      }
+      var rowIndexes = this._getGridRange(this._rowY, startY, edgeY);
+      var colIndexes = this._getGridRange(this._colX, startX, edgeX);
+      if (!rowIndexes.length || !colIndexes.length) {
+        var fallback = this.getSquareAtXY([startX, startY]);
+        if (!fallback) {
+          return true;
         }
-      });
-      return collides;
+        rowIndexes = [fallback.row];
+        colIndexes = [fallback.col];
+      }
+      for (var r = 0; r < rowIndexes.length; r++) {
+        for (var c = 0; c < colIndexes.length; c++) {
+          var square = this.squares[rowIndexes[r]] && this.squares[rowIndexes[r]][colIndexes[c]];
+          if (!square) {
+            continue;
+          }
+          var walls = square.getWalls();
+          for (var j = 0; j < walls.length; j++) {
+            if (doRectsOverlap(rect, walls[j].getRect())) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
     }
     isOutOfBounds(pos) {
       if (pos[0] <= 0 || pos[0] >= this.width || pos[1] <= 0 || pos[1] >= this.height) {
@@ -3339,15 +4937,10 @@
     }
     restart() {
       this.randomize();
-      this.message = "restart";
-      this.num_of_destroyed_tanks = 0;
+      this.resetRoundState("restart");
       for (var i = 0; i < this.tanks.length; i++) {
         this.tanks[i].restart();
       }
-      this.powerups = [];
-      this.pendingPowerupEvents = [];
-      this.teleportMirrors = {};
-      this.lastSnapshot = null;
     }
     //Takes obj with x, y, width and height properties and sets x,y to place it in a random valid position
     placeObject(object) {
@@ -3366,891 +4959,6 @@
     }
     registerTank(tank) {
       this.tankById[tank.id || "tank-" + this.tanks.length] = tank;
-    }
-    serializeLayout() {
-      var layout = [];
-      for (var r = 0; r < this.squares.length; r++) {
-        var row = [];
-        for (var c = 0; c < this.squares[r].length; c++) {
-          var sq = this.squares[r][c];
-          row.push({
-            north: !!(sq.north && sq.north.isActive),
-            south: !!(sq.south && sq.south.isActive),
-            east: !!(sq.east && sq.east.isActive),
-            west: !!(sq.west && sq.west.isActive)
-          });
-        }
-        layout.push(row);
-      }
-      return {
-        num_of_rows: this.num_of_rows,
-        num_of_columns: this.num_of_columns,
-        wall_thiccness: this.wall_thiccness,
-        squares: layout
-      };
-    }
-    loadLayout(data) {
-      if (!data || !data.squares) {
-        return;
-      }
-      this.num_of_rows = data.num_of_rows || this.num_of_rows;
-      this.num_of_columns = data.num_of_columns || this.num_of_columns;
-      this.wall_thiccness = data.wall_thiccness || this.wall_thiccness;
-      for (var r = 0; r < this.squares.length && r < data.squares.length; r++) {
-        for (var c = 0; c < this.squares[r].length && c < data.squares[r].length; c++) {
-          var square = this.squares[r][c];
-          var src = data.squares[r][c] || {};
-          if (square.north) square.north.isActive = !!src.north;
-          if (square.south) square.south.isActive = !!src.south;
-          if (square.east) square.east.isActive = !!src.east;
-          if (square.west) square.west.isActive = !!src.west;
-        }
-      }
-    }
-    serializeState() {
-      return this.captureState();
-    }
-    captureState() {
-      var self = this;
-      var tanksState = this.tanks.map(function(tank, index) {
-        return self.cloneTankState({
-          id: tank.id || "tank-" + index,
-          colour: tank.colour,
-          ownerPeerId: tank.ownerPeerId,
-          x: tank.x,
-          y: tank.y,
-          rotation: tank.rotation,
-          score: tank.score,
-          is_dead: tank.is_dead,
-          width: tank.width,
-          height: tank.height,
-          bullets: tank.bullets.map(function(bullet) {
-            return { x: bullet.x, y: bullet.y, radius: bullet.radius, colour: tank.colour };
-          }),
-          powerups: tank.powerups.map(function(powerup) {
-            return powerup.serialize ? powerup.serialize() : { name: powerup.name, type: powerup.constructor && powerup.constructor.name ? powerup.constructor.name : powerup.name, spriteId: powerup.img && powerup.img.id ? powerup.img.id : null };
-          })
-        });
-      });
-      var boardPowerups = this.serializeBoardPowerups();
-      var snapshot = {
-        message: this.message,
-        tanks: tanksState,
-        powerups: boardPowerups,
-        events: this.consumePendingEvents ? this.consumePendingEvents() : []
-      };
-      try {
-        this.state.tanks = {};
-        for (var i = 0; i < tanksState.length; i++) {
-          var ts = tanksState[i];
-          this.state.tanks[ts.id] = { id: ts.id, x: ts.x, y: ts.y, rotation: ts.rotation, width: ts.width, height: ts.height, colour: ts.colour, score: ts.score, is_dead: ts.is_dead, powerups: (ts.powerups || []).map(function(p) {
-            return { type: p.type || p.name, spriteId: p.spriteId || null };
-          }) };
-        }
-      } catch (_) {
-      }
-      return snapshot;
-    }
-    serializeBoardPowerups() {
-      var list = [];
-      for (var i = 0; i < this.powerups.length; i++) {
-        var powerup = this.powerups[i];
-        if (!powerup) {
-          continue;
-        }
-        if (!powerup.id) {
-          powerup.id = "powerup-" + this.nextPowerupId++;
-        }
-        list.push({
-          id: powerup.id,
-          type: powerup.constructor && powerup.constructor.name ? powerup.constructor.name : powerup.name,
-          name: powerup.name,
-          x: powerup.x,
-          y: powerup.y,
-          width: powerup.width,
-          height: powerup.height,
-          spriteId: powerup.img && powerup.img.id ? powerup.img.id : null,
-          color: powerup.color || "#ffffff"
-        });
-        try {
-          this.state && (this.state.powerups[powerup.id] = { id: powerup.id, type: list[list.length - 1].type, x: powerup.x, y: powerup.y, width: powerup.width, height: powerup.height });
-        } catch (_) {
-        }
-      }
-      return list;
-    }
-    cloneTankState(tankState) {
-      return JSON.parse(JSON.stringify(tankState));
-    }
-    clonePowerupState(powerupState) {
-      return JSON.parse(JSON.stringify(powerupState));
-    }
-    clonePowerupList(list) {
-      var self = this;
-      var source = Array.isArray(list) ? list : [];
-      return source.map(function(powerup) {
-        return self.clonePowerupState(powerup);
-      });
-    }
-    cloneSnapshot(snapshot) {
-      if (!snapshot) {
-        return { message: "", tanks: [], powerups: [], events: [] };
-      }
-      var tanks = Array.isArray(snapshot.tanks) ? snapshot.tanks : [];
-      var self = this;
-      return {
-        message: snapshot.message,
-        tanks: tanks.map(function(tank) {
-          return self.cloneTankState(tank);
-        }),
-        powerups: self.clonePowerupList(snapshot.powerups),
-        events: []
-      };
-    }
-    collectRemoteTankMeta() {
-      var list = [];
-      if (!this.remoteTankMap) {
-        return list;
-      }
-      for (var id in this.remoteTankMap) {
-        if (Object.prototype.hasOwnProperty.call(this.remoteTankMap, id)) {
-          list.push(this.remoteTankMap[id]);
-        }
-      }
-      return list;
-    }
-    captureRemoteTankSnapshot() {
-      var snapshot = {};
-      if (!this.remoteTankMap) {
-        return snapshot;
-      }
-      for (var id in this.remoteTankMap) {
-        if (!Object.prototype.hasOwnProperty.call(this.remoteTankMap, id)) {
-          continue;
-        }
-        var tank = this.remoteTankMap[id];
-        if (!tank) {
-          continue;
-        }
-        snapshot[id] = {
-          x: typeof tank.x === "number" ? tank.x : 0,
-          y: typeof tank.y === "number" ? tank.y : 0,
-          rotation: typeof tank.rotation === "number" ? tank.rotation : 0
-        };
-      }
-      return snapshot;
-    }
-    resetRemoteInterpolation() {
-      var snapshot = this.captureRemoteTankSnapshot();
-      var now = nowMs();
-      this.remoteInterpolation = {
-        previous: snapshot,
-        target: snapshot,
-        timestamp: now,
-        duration: 16
-      };
-    }
-    updateRemoteInterpolation(prevSnapshot, nextSnapshot) {
-      if (!nextSnapshot) {
-        nextSnapshot = this.captureRemoteTankSnapshot();
-      }
-      var now = nowMs();
-      var lastTimestamp = this.remoteInterpolation && this.remoteInterpolation.timestamp || null;
-      if (!prevSnapshot || Object.keys(prevSnapshot).length === 0) {
-        prevSnapshot = nextSnapshot;
-      }
-      if (!nextSnapshot) {
-        nextSnapshot = prevSnapshot;
-      }
-      var duration = lastTimestamp ? now - lastTimestamp : 100;
-      if (!duration || duration < 16) {
-        duration = 16;
-      } else if (duration > 250) {
-        duration = 250;
-      }
-      this.remoteInterpolation = {
-        previous: prevSnapshot,
-        target: nextSnapshot,
-        timestamp: now,
-        duration
-      };
-    }
-    getRemoteInterpolationAlpha() {
-      if (!this.remoteInterpolation) {
-        return 1;
-      }
-      var duration = this.remoteInterpolation.duration || 1;
-      var elapsed = nowMs() - this.remoteInterpolation.timestamp;
-      if (!duration || duration <= 0) {
-        return 1;
-      }
-      if (elapsed <= 0) {
-        return 0;
-      }
-      if (elapsed >= duration) {
-        return 1;
-      }
-      return elapsed / duration;
-    }
-    getInterpolatedRemoteTankState(tankState) {
-      if (!tankState || !tankState.id) {
-        return tankState;
-      }
-      if (!this.remoteInterpolation || !this.remoteInterpolation.previous || !this.remoteInterpolation.target) {
-        return tankState;
-      }
-      var prev = this.remoteInterpolation.previous[tankState.id];
-      var next = this.remoteInterpolation.target[tankState.id];
-      if (!prev || !next) {
-        return tankState;
-      }
-      var alpha = this.getRemoteInterpolationAlpha();
-      if (!(alpha > 0 && alpha < 1)) {
-        return tankState;
-      }
-      var clone = Object.assign({}, tankState);
-      clone.x = lerpNumber(prev.x, next.x, alpha);
-      clone.y = lerpNumber(prev.y, next.y, alpha);
-      clone.rotation = lerpNumber(prev.rotation, next.rotation, alpha);
-      return clone;
-    }
-    buildStatePacket() {
-      var current = this.captureState();
-      var packet = null;
-      if (!this.lastSnapshot) {
-        packet = { type: "state-init", state: current };
-      } else {
-        var delta = this.diffSnapshots(this.lastSnapshot, current);
-        if (delta) {
-          packet = { type: "state-delta", delta };
-        }
-      }
-      this.lastSnapshot = this.cloneSnapshot(current);
-      return packet;
-    }
-    // Build unified delta JSON comparing previous unified state
-    buildUnifiedDeltaPacket() {
-      try {
-        var prev = this._lastUnifiedState || { tanks: {}, powerups: {} };
-        var json = this.serializeUnifiedDelta(prev);
-        this._lastUnifiedState = JSON.parse(this.serializeUnifiedSnapshot());
-        return "V," + json;
-      } catch (_) {
-        return null;
-      }
-    }
-    // New unified-state serializers/apply methods (guests consume)
-    serializeUnifiedSnapshot() {
-      try {
-        return JSON.stringify({ tanks: this.state.tanks || {}, powerups: this.state.powerups || {} });
-      } catch (_) {
-        return "{}";
-      }
-    }
-    applyUnifiedSnapshot(json) {
-      try {
-        var obj = typeof json === "string" ? JSON.parse(json) : json || {};
-        this.state.tanks = obj.tanks || {};
-        this.state.powerups = obj.powerups || {};
-        this.remoteTankMap = {};
-        for (var id in this.state.tanks) {
-          if (!Object.prototype.hasOwnProperty.call(this.state.tanks, id)) continue;
-          this.remoteTankMap[id] = this.state.tanks[id];
-        }
-        this.remoteTankMeta = this.collectRemoteTankMeta();
-        this.resetRemoteInterpolation();
-        if (typeof this.recomputeGlobalPowerups === "function") {
-          this.recomputeGlobalPowerups();
-        }
-      } catch (_) {
-      }
-    }
-    // Delta format: { tanks: { set: {id->state}, del: [ids] }, powerups: { set: {id->entry}, del: [ids] } }
-    serializeUnifiedDelta(prev) {
-      var delta = { tanks: { set: {}, del: [] }, powerups: { set: {}, del: [] } };
-      try {
-        var pt = prev && prev.tanks || {};
-        var ct = this.state.tanks || {};
-        for (var id in ct) {
-          if (!Object.prototype.hasOwnProperty.call(ct, id)) continue;
-          var a = JSON.stringify(pt[id] || null), b = JSON.stringify(ct[id]);
-          if (a !== b) {
-            delta.tanks.set[id] = ct[id];
-          }
-        }
-        for (var id2 in pt) {
-          if (!Object.prototype.hasOwnProperty.call(pt, id2)) continue;
-          if (!Object.prototype.hasOwnProperty.call(ct, id2)) {
-            delta.tanks.del.push(id2);
-          }
-        }
-        var pp = prev && prev.powerups || {};
-        var cp = this.state.powerups || {};
-        for (var pid in cp) {
-          if (!Object.prototype.hasOwnProperty.call(cp, pid)) continue;
-          var pa = JSON.stringify(pp[pid] || null), pb = JSON.stringify(cp[pid]);
-          if (pa !== pb) {
-            delta.powerups.set[pid] = cp[pid];
-          }
-        }
-        for (var pid2 in pp) {
-          if (!Object.prototype.hasOwnProperty.call(pp, pid2)) continue;
-          if (!Object.prototype.hasOwnProperty.call(cp, pid2)) {
-            delta.powerups.del.push(pid2);
-          }
-        }
-      } catch (_) {
-      }
-      return JSON.stringify(delta);
-    }
-    applyUnifiedDelta(json) {
-      try {
-        var prevSnapshot = this.captureRemoteTankSnapshot();
-        var d = typeof json === "string" ? JSON.parse(json) : json || {};
-        var ts = d.tanks || {};
-        var ps = d.powerups || {};
-        this.state.tanks = this.state.tanks || {};
-        (ts.del || []).forEach((id2) => {
-          delete this.state.tanks[id2];
-          delete this.remoteTankMap[id2];
-        });
-        var setT = ts.set || {};
-        for (var id in setT) {
-          if (!Object.prototype.hasOwnProperty.call(setT, id)) continue;
-          this.state.tanks[id] = setT[id];
-          this.remoteTankMap[id] = setT[id];
-        }
-        this.state.powerups = this.state.powerups || {};
-        (ps.del || []).forEach((pid2) => {
-          delete this.state.powerups[pid2];
-        });
-        var setP = ps.set || {};
-        for (var pid in setP) {
-          if (!Object.prototype.hasOwnProperty.call(setP, pid)) continue;
-          this.state.powerups[pid] = setP[pid];
-        }
-        this.remoteTankMeta = this.collectRemoteTankMeta();
-        if (typeof this.recomputeGlobalPowerups === "function") {
-          this.recomputeGlobalPowerups();
-        }
-      } catch (_) {
-      }
-    }
-    // Compact string serializers (Phase 1)
-    serializeInitString() {
-      var s = this.settings || {};
-      var rows = this.num_of_rows || s.num_of_rows || 0;
-      var cols = this.num_of_columns || s.num_of_columns || 0;
-      var wall = this.wall_thiccness || s.wall_thiccness || 0;
-      var mv = +(s.move_speed != null ? s.move_speed : 0);
-      var rv = +(s.rotation_speed != null ? s.rotation_speed : 0);
-      var bv = +(s.bullet_speed != null ? s.bullet_speed : 0);
-      var bl = +(s.bullet_limit != null ? s.bullet_limit : 0);
-      var bo = +(s.bounce_limit != null ? s.bounce_limit : 0);
-      var pi = +(s.powerup_interval != null ? s.powerup_interval : 0);
-      var pl = +(s.powerup_limit != null ? s.powerup_limit : 0);
-      var pd = +(s.powerup_duration != null ? s.powerup_duration : 0);
-      var ff = s.friendly_fire ? 1 : 0;
-      var layoutObj = this.serializeLayout ? this.serializeLayout() : null;
-      var layoutStr = layoutObj ? btoa(unescape(encodeURIComponent(JSON.stringify(layoutObj)))) : "";
-      var powerupBlocks = (this.powerups || []).map(function(p) {
-        if (!p) {
-          return "";
-        }
-        var x = Math.round(p.x) || 0;
-        var y = Math.round(p.y) || 0;
-        var w = Math.round(p.width) || 0;
-        var h = Math.round(p.height) || 0;
-        var sid = p.img && p.img.id ? p.img.id : "";
-        var c = (p.color || "").replace(/[,|;]/g, "");
-        return [x, y, w, h, sid, c].join("|");
-      }).filter(Boolean).join(";");
-      var tankBlocks = (this.tanks || []).map(function(t, index) {
-        if (!t) {
-          return "";
-        }
-        var id = t.id || "tank-" + index;
-        var x = Math.round(t.x) || 0;
-        var y = Math.round(t.y) || 0;
-        var r = +(t.rotation || 0).toFixed(4);
-        var w = Math.round(t.width) || 0;
-        var h = Math.round(t.height) || 0;
-        var c = (t.colour || "").replace(/[,|;]/g, "");
-        var s2 = +(t.score || 0);
-        return [id, x, y, r, w, h, c, s2].join("|");
-      }).filter(Boolean).join(";");
-      return ["I", rows, cols, wall, mv, rv, bv, bl, bo, pi, pl, pd, ff, layoutStr, powerupBlocks, tankBlocks].join(",");
-    }
-    serializeDeltaString() {
-      var tanks = (this.tanks || []).map(function(t2, index) {
-        if (!t2) {
-          return "";
-        }
-        var id2 = t2.id || "tank-" + index;
-        var x = Math.round(t2.x) || 0;
-        var y = Math.round(t2.y) || 0;
-        var r = +(t2.rotation || 0).toFixed(4);
-        var s2 = +(t2.score || 0);
-        var alive = t2.is_dead ? 0 : 1;
-        return [id2, x, y, r, s2, alive].join("|");
-      }).filter(Boolean).join(";");
-      var bullets = [];
-      (this.tanks || []).forEach(function(t2) {
-        (t2.bullets || []).forEach(function(b) {
-          var vx = +(b.direction && b.direction[0] || 0).toFixed(3);
-          var vy = +(b.direction && b.direction[1] || 0).toFixed(3);
-          var col = (t2.colour || "").replace(/[,|;]/g, "");
-          var rad = Math.round(b.radius || 1);
-          bullets.push([Math.round(b.x) || 0, Math.round(b.y) || 0, vx, vy, col, rad].join("|"));
-        });
-      });
-      var powerups = (this.powerups || []).map(function(p2) {
-        if (!p2) {
-          return "";
-        }
-        var x = Math.round(p2.x) || 0;
-        var y = Math.round(p2.y) || 0;
-        var w = Math.round(p2.width) || 0;
-        var h = Math.round(p2.height) || 0;
-        var sid = p2.img && p2.img.id ? p2.img.id : "";
-        var c = (p2.color || "").replace(/[,|;]/g, "");
-        return [x, y, w, h, sid, c].join("|");
-      }).filter(Boolean).join(";");
-      var evts = this.consumePendingEvents();
-      var events = "";
-      if (evts && evts.length) {
-        var partsE = [];
-        for (var ei = 0; ei < evts.length; ei++) {
-          var e = evts[ei];
-          if (!e) continue;
-          var p = (e.powerup || "").replace(/[,|;]/g, "");
-          var s = (e.status || "").replace(/[,|;]/g, "");
-          var t = (e.target || "").replace(/[,|;]/g, "");
-          var id = (e.tankId || "").replace(/[,|;]/g, "");
-          partsE.push([p, s, t, id].join("|"));
-        }
-        events = partsE.join(";");
-      }
-      return ["D", tanks, bullets.join(";"), powerups, events].join(",");
-    }
-    applyInitString(str) {
-      if (typeof str !== "string" || !str || str[0] !== "I") {
-        return;
-      }
-      var parts = str.split(",");
-      var toInt = function(v) {
-        var n = parseInt(v, 10);
-        return isNaN(n) ? 0 : n;
-      };
-      var toNum = function(v) {
-        var n = parseFloat(v);
-        return isNaN(n) ? 0 : n;
-      };
-      this.num_of_rows = toInt(parts[1]);
-      this.num_of_columns = toInt(parts[2]);
-      this.wall_thiccness = toInt(parts[3]);
-      this.settings.move_speed = toNum(parts[4]);
-      this.settings.rotation_speed = toNum(parts[5]);
-      this.settings.bullet_speed = toNum(parts[6]);
-      this.settings.bullet_limit = toInt(parts[7]);
-      this.settings.bounce_limit = toInt(parts[8]);
-      this.settings.powerup_interval = toNum(parts[9]);
-      this.settings.powerup_limit = toInt(parts[10]);
-      this.settings.powerup_duration = toNum(parts[11]);
-      this.settings.friendly_fire = parts[12] === "1";
-      var layoutObj = null;
-      try {
-        var layoutToken = parts[13] || "";
-        if (layoutToken) {
-          var json = decodeURIComponent(escape(atob(layoutToken)));
-          layoutObj = JSON.parse(json);
-        }
-      } catch (e) {
-        layoutObj = null;
-      }
-      this._buildGridEdges();
-      this.squares = [];
-      for (var r = 0; r < this.num_of_rows; r++) {
-        var row = [];
-        for (var c = 0; c < this.num_of_columns; c++) {
-          row.push(new Square(this, r, c));
-        }
-        this.squares.push(row);
-      }
-      this._initWalls();
-      if (layoutObj && layoutObj.squares && this.loadLayout) {
-        this.loadLayout(layoutObj);
-      }
-      this.remotePowerups = [];
-      var pBlock = parts[14] || "";
-      if (pBlock) {
-        var pEntries = pBlock.split(";");
-        for (var pi = 0; pi < pEntries.length; pi++) {
-          var tok = pEntries[pi];
-          if (!tok) {
-            continue;
-          }
-          var f = tok.split("|");
-          this.remotePowerups.push({
-            x: parseInt(f[0], 10) || 0,
-            y: parseInt(f[1], 10) || 0,
-            width: parseInt(f[2], 10) || 0,
-            height: parseInt(f[3], 10) || 0,
-            spriteId: f[4] || "",
-            color: f[5] || "#ffffff"
-          });
-        }
-      }
-      this.remoteTankMap = {};
-      var tankBlock = parts[15] || "";
-      if (tankBlock) {
-        var entries = tankBlock.split(";");
-        for (var i = 0; i < entries.length; i++) {
-          var tok = entries[i];
-          if (!tok) {
-            continue;
-          }
-          var f = tok.split("|");
-          var id = f[0];
-          this.remoteTankMap[id] = {
-            id,
-            x: toInt(f[1]),
-            y: toInt(f[2]),
-            rotation: toNum(f[3]),
-            width: toInt(f[4]),
-            height: toInt(f[5]),
-            colour: f[6] || "#ffffff",
-            score: toInt(f[7])
-          };
-        }
-      }
-      this.remoteTankMeta = this.collectRemoteTankMeta();
-      this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
-      this.resetRemoteInterpolation();
-      this.recomputeGlobalPowerups && this.recomputeGlobalPowerups();
-      this.prerenderBackground();
-      this.message = "Awaiting host updates...";
-    }
-    applyDeltaString(str) {
-      if (typeof str !== "string" || !str || str[0] !== "D") {
-        return;
-      }
-      var prevSnapshot = this.captureRemoteTankSnapshot();
-      var parts = str.split(",");
-      var toInt = function(v) {
-        var n = parseInt(v, 10);
-        return isNaN(n) ? 0 : n;
-      };
-      var toNum = function(v) {
-        var n = parseFloat(v);
-        return isNaN(n) ? 0 : n;
-      };
-      var base = 1;
-      if (parts.length >= 6) {
-        base = 2;
-      }
-      var tankBlock = parts[base] || "";
-      if (tankBlock) {
-        var entries = tankBlock.split(";");
-        for (var i = 0; i < entries.length; i++) {
-          var tok = entries[i];
-          if (!tok) {
-            continue;
-          }
-          var f = tok.split("|");
-          var id = f[0];
-          var existing = this.remoteTankMap && this.remoteTankMap[id] ? this.remoteTankMap[id] : { id };
-          existing.x = toInt(f[1]);
-          existing.y = toInt(f[2]);
-          existing.rotation = toNum(f[3]);
-          existing.score = toInt(f[4]);
-          if (f.length > 5 && f[5] !== "") {
-            var aliveFlag = toInt(f[5]);
-            existing.is_dead = aliveFlag === 0;
-          } else if (typeof existing.is_dead !== "boolean") {
-            existing.is_dead = false;
-          }
-          this.remoteTankMap[id] = existing;
-        }
-      }
-      this.remoteTankMeta = this.collectRemoteTankMeta();
-      try {
-        if (this.settings && this.settings.friendly_fire) {
-          var tanksArr = this.remoteTankMeta || [];
-          var bulletsArr = this.remoteGlobalBullets || [];
-          for (var ti = 0; ti < tanksArr.length; ti++) {
-            var rt = tanksArr[ti];
-            if (!rt || rt.is_dead) continue;
-            var tx = rt.x, ty = rt.y;
-            var tw = rt.width || this.width / this.num_of_columns / 3;
-            var th = rt.height || this.height / this.num_of_rows / 3;
-            for (var bi = 0; bi < bulletsArr.length; bi++) {
-              var rb = bulletsArr[bi];
-              if (!rb) continue;
-              if (rb.colour && rt.colour && rb.colour === rt.colour) {
-                continue;
-              }
-              var br = rb.radius || 1;
-              var bx0 = rb.x - br, by0 = rb.y - br, bw = br * 2, bh = br * 2;
-              if (doRectsOverlap([tx, ty, tw, th], [bx0, by0, bw, bh])) {
-                rt.is_dead = true;
-                var mt = this.remoteTankMap && this.remoteTankMap[rt.id];
-                if (mt) {
-                  mt.is_dead = true;
-                }
-                break;
-              }
-            }
-          }
-        }
-      } catch (e) {
-      }
-      var bullets = [];
-      var bulletBlock = parts[base + 1] || "";
-      if (bulletBlock) {
-        var bEntries = bulletBlock.split(";");
-        for (var j = 0; j < bEntries.length; j++) {
-          var b = bEntries[j];
-          if (!b) {
-            continue;
-          }
-          var bf = b.split("|");
-          bullets.push({ x: toInt(bf[0]), y: toInt(bf[1]), vx: toNum(bf[2]), vy: toNum(bf[3]), colour: bf[4] || "#000000", radius: toInt(bf[5]) || 1 });
-        }
-      }
-      this.remoteGlobalBullets = bullets;
-      var newPowerups = [];
-      var pBlockDelta = parts[base + 2] || "";
-      if (pBlockDelta) {
-        var entriesP = pBlockDelta.split(";");
-        for (var k = 0; k < entriesP.length; k++) {
-          var tk = entriesP[k];
-          if (!tk) {
-            continue;
-          }
-          var pf = tk.split("|");
-          newPowerups.push({
-            x: toInt(pf[0]),
-            y: toInt(pf[1]),
-            width: toInt(pf[2]),
-            height: toInt(pf[3]),
-            spriteId: pf[4] || "",
-            color: pf[5] || "#ffffff"
-          });
-        }
-      }
-      this.remotePowerups = newPowerups;
-      this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
-      var nextSnapshot = this.captureRemoteTankSnapshot();
-      this.updateRemoteInterpolation(prevSnapshot, nextSnapshot);
-      var eventsBlock = parts[base + 3] || "";
-      if (eventsBlock) {
-        var entriesE = eventsBlock.split(";");
-        for (var eIdx = 0; eIdx < entriesE.length; eIdx++) {
-          var ek = entriesE[eIdx];
-          if (!ek) {
-            continue;
-          }
-          var ef = ek.split("|");
-          var evt = { type: "powerup", powerup: ef[0] || "", status: ef[1] || "", target: ef[2] || "", tankId: ef[3] || "" };
-          this.applyPowerupEvent(evt);
-        }
-      }
-    }
-    diffSnapshots(prev, curr) {
-      prev = prev || {};
-      curr = curr || {};
-      var delta = {};
-      var prevTanks = Array.isArray(prev.tanks) ? prev.tanks : [];
-      var currTanks = Array.isArray(curr.tanks) ? curr.tanks : [];
-      var prevPowerups = Array.isArray(prev.powerups) ? prev.powerups : [];
-      var currPowerups = Array.isArray(curr.powerups) ? curr.powerups : [];
-      if (curr.message !== prev.message) {
-        delta.message = curr.message;
-      }
-      var changedTanks = [];
-      var prevMap = {};
-      var currMap = {};
-      prevTanks.forEach(function(tank, index) {
-        if (!tank) {
-          return;
-        }
-        var prevId2 = tank.id ? tank.id : "tank-" + index;
-        prevMap[prevId2] = tank;
-      });
-      currTanks.forEach(function(tank, index) {
-        if (!tank) {
-          return;
-        }
-        var currId = tank.id ? tank.id : "tank-" + index;
-        currMap[currId] = tank;
-      });
-      var self = this;
-      for (var id in currMap) {
-        var newTank = currMap[id];
-        var oldTank = prevMap[id];
-        if (!oldTank || self.hasTankChanged(oldTank, newTank)) {
-          changedTanks.push(newTank);
-        }
-      }
-      if (changedTanks.length) {
-        delta.tanks = changedTanks;
-      }
-      var removed = [];
-      for (var prevId in prevMap) {
-        if (!currMap[prevId]) {
-          removed.push(prevId);
-        }
-      }
-      if (removed.length) {
-        delta.removedTanks = removed;
-      }
-      if (this.haveBoardPowerupsChanged(prevPowerups, currPowerups)) {
-        delta.powerups = this.clonePowerupList(currPowerups);
-      }
-      var currEvents = Array.isArray(curr.events) ? curr.events : [];
-      if (currEvents.length) {
-        delta.events = currEvents;
-      }
-      return Object.keys(delta).length ? delta : null;
-    }
-    hasTankChanged(prevTank, newTank) {
-      if (!prevTank || !newTank) {
-        return prevTank !== newTank;
-      }
-      if (prevTank.x !== newTank.x || prevTank.y !== newTank.y) {
-        return true;
-      }
-      if (prevTank.rotation !== newTank.rotation) {
-        return true;
-      }
-      if (prevTank.colour !== newTank.colour) {
-        return true;
-      }
-      if (prevTank.ownerPeerId !== newTank.ownerPeerId) {
-        return true;
-      }
-      if (prevTank.width !== newTank.width || prevTank.height !== newTank.height) {
-        return true;
-      }
-      if (prevTank.score !== newTank.score) {
-        return true;
-      }
-      if (!!prevTank.is_dead !== !!newTank.is_dead) {
-        return true;
-      }
-      if (this.haveBulletsChanged(prevTank.bullets, newTank.bullets)) {
-        return true;
-      }
-      if (this.havePowerupsChanged(prevTank.powerups, newTank.powerups)) {
-        return true;
-      }
-      return false;
-    }
-    haveBulletsChanged(prevBullets, newBullets) {
-      prevBullets = prevBullets || [];
-      newBullets = newBullets || [];
-      if (prevBullets.length !== newBullets.length) {
-        return true;
-      }
-      for (var i = 0; i < prevBullets.length; i++) {
-        var a = prevBullets[i];
-        var b = newBullets[i];
-        if (a.x !== b.x || a.y !== b.y || a.radius !== b.radius) {
-          return true;
-        }
-      }
-      return false;
-    }
-    // Backwards-compat alias; recompute current global visual flags from meta
-    syncGlobalPowerups() {
-      this.recomputeGlobalPowerups();
-    }
-    // Recompute visual global flags (e.g., Trippy) from remote tank metadata
-    recomputeGlobalPowerups() {
-      try {
-        var meta = this.remoteTankMeta || [];
-        var hasTrippy = 0;
-        for (var i = 0; i < meta.length; i++) {
-          var t = meta[i];
-          if (!t || !t.powerups) continue;
-          for (var j = 0; j < t.powerups.length; j++) {
-            var pu = t.powerups[j];
-            var nm = (pu && (pu.type || pu.name || "")) + "";
-            if (/Trippy/i.test(nm)) {
-              hasTrippy++;
-              break;
-            }
-          }
-        }
-        this.trippyCount = hasTrippy;
-      } catch (_) {
-      }
-    }
-    havePowerupsChanged(prevPowerups, newPowerups) {
-      prevPowerups = prevPowerups || [];
-      newPowerups = newPowerups || [];
-      if (prevPowerups.length !== newPowerups.length) {
-        return true;
-      }
-      for (var i = 0; i < prevPowerups.length; i++) {
-        var a = prevPowerups[i];
-        var b = newPowerups[i];
-        if ((a && a.type) !== (b && b.type)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    haveBoardPowerupsChanged(prevPowerups, newPowerups) {
-      prevPowerups = Array.isArray(prevPowerups) ? prevPowerups : [];
-      newPowerups = Array.isArray(newPowerups) ? newPowerups : [];
-      if (prevPowerups.length !== newPowerups.length) {
-        return true;
-      }
-      var prevMap = {};
-      prevPowerups.forEach(function(powerup2, index) {
-        if (!powerup2) {
-          return;
-        }
-        var id2 = powerup2.id || "powerup-" + index;
-        prevMap[id2] = powerup2;
-      });
-      for (var i = 0; i < newPowerups.length; i++) {
-        var powerup = newPowerups[i];
-        if (!powerup) {
-          return true;
-        }
-        var id = powerup.id || "powerup-" + i;
-        var prevEntry = prevMap[id];
-        if (!prevEntry) {
-          return true;
-        }
-        if (prevEntry.x !== powerup.x || prevEntry.y !== powerup.y) {
-          return true;
-        }
-        if (prevEntry.width !== powerup.width || prevEntry.height !== powerup.height) {
-          return true;
-        }
-        if ((prevEntry.spriteId || null) !== (powerup.spriteId || null)) {
-          return true;
-        }
-        if ((prevEntry.type || null) !== (powerup.type || null)) {
-          return true;
-        }
-        if ((prevEntry.color || null) !== (powerup.color || null)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    getCachedSnapshot() {
-      if (this.lastSnapshot) {
-        return this.cloneSnapshot(this.lastSnapshot);
-      }
-      var snapshot = this.captureState();
-      this.lastSnapshot = this.cloneSnapshot(snapshot);
-      return snapshot;
     }
     // Legacy JSON state/delta paths were removed
     applyInputState(state) {
@@ -4275,21 +4983,66 @@
         return;
       }
       var now = performance.now();
-      if (this.lastSnapshot && now - this.lastStateBroadcast < 30) {
+      var resyncInterval = this._fullResyncIntervalMs || 1e3;
+      var resyncDue = !this._lastFullSyncTime || now - this._lastFullSyncTime >= resyncInterval;
+      if (!resyncDue && this.lastSnapshot && now - this.lastStateBroadcast < 30) {
         return;
       }
       var packet = this.buildStatePacket();
       if (!packet) {
+        if (resyncDue) {
+          this._sendUnifiedSnapshot();
+          this._lastFullSyncTime = now;
+          this.lastStateBroadcast = now;
+        }
         return;
       }
       this.lastStateBroadcast = now;
+      if (packet.type === "state-init") {
+        this._sendInitialSnapshot();
+        this._lastFullSyncTime = now;
+        return;
+      }
+      if (resyncDue) {
+        this._sendUnifiedSnapshot();
+        this._lastFullSyncTime = now;
+        return;
+      }
       try {
-        if (packet.type === "state-init") {
-          peerManager.broadcast(this.serializeInitString());
-        } else if (packet.type === "state-delta") {
-          peerManager.broadcast(this.serializeDeltaString());
+        var unifiedDelta = typeof this.buildUnifiedDeltaPacket === "function" ? this.buildUnifiedDeltaPacket() : null;
+        if (unifiedDelta) {
+          peerManager.broadcast(unifiedDelta);
         }
       } catch (e) {
+      }
+    }
+    _sendInitialSnapshot() {
+      try {
+        if (typeof this.serializeInitString === "function") {
+          peerManager.broadcast(this.serializeInitString());
+        }
+      } catch (_) {
+      }
+      this._sendUnifiedSnapshot();
+    }
+    _sendUnifiedSnapshot() {
+      if (!peerManager) {
+        return;
+      }
+      try {
+        if (typeof this.serializeUnifiedSnapshot === "function") {
+          var snapshot = this.serializeUnifiedSnapshot();
+          if (snapshot) {
+            peerManager.broadcast("U," + snapshot);
+            try {
+              this._lastUnifiedState = JSON.parse(snapshot);
+            } catch (_) {
+            }
+          }
+        } else if (typeof this.serializeDeltaString === "function") {
+          peerManager.broadcast(this.serializeDeltaString());
+        }
+      } catch (_) {
       }
     }
     drawSpectator() {
@@ -4335,10 +5088,10 @@
       if (tanks) {
         for (var i = 0; i < tanks.length; i++) {
           var t = tanks[i];
-          var renderTank = this.getInterpolatedRemoteTankState(t) || t;
+          var renderTank = this.getRemoteRenderTank(t) || t;
           this.drawRemoteTank(renderTank);
-          var tankId = renderTank && renderTank.id || t && t.id;
-          var hasTeleport = tankId && this.teleportMirrors && this.teleportMirrors[tankId] || t && t.powerups && t.powerups.some(function(p2) {
+          var tankId = renderTank && renderTank.id;
+          var hasTeleport = tankId && this.teleportMirrors && this.teleportMirrors[tankId] || renderTank && renderTank.powerups && renderTank.powerups.some(function(p2) {
             return p2 && p2.type === "TeleportPowerup";
           });
           if (hasTeleport) {
@@ -4433,165 +5186,347 @@
       ctx.globalAlpha = oldAlpha;
       ctx.restore();
     }
-    //Will fail if length if full. Will not eject oldest powerup.
+    getRemoteRenderTank(tank) {
+      if (!this.spectator || !tank || !tank.id) {
+        return tank;
+      }
+      var sample = this._sampleRemoteLerpState(tank.id, tank);
+      if (!sample) {
+        return tank;
+      }
+      if (sample.x === (tank.x || 0) && sample.y === (tank.y || 0) && sample.rotation === (tank.rotation || 0)) {
+        return tank;
+      }
+      var clone = Object.assign({}, tank);
+      clone.x = sample.x;
+      clone.y = sample.y;
+      clone.rotation = sample.rotation;
+      return clone;
+    }
+    _primeRemoteLerpTargets(ids) {
+      if (!this.spectator || !Array.isArray(ids) || !ids.length) {
+        return;
+      }
+      if (!this.remoteTankLerpStates) {
+        this.remoteTankLerpStates = {};
+      }
+      var now = this._nowTimestamp();
+      var duration = Math.max(16, this.remoteTankLerpDuration || 0);
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        if (!id) {
+          continue;
+        }
+        var base = this.remoteTankMap && this.remoteTankMap[id];
+        if (!base) {
+          continue;
+        }
+        var sample = this._sampleRemoteLerpState(id, base);
+        this.remoteTankLerpStates[id] = {
+          fromX: sample.x,
+          fromY: sample.y,
+          fromRot: sample.rotation,
+          toX: base.x || 0,
+          toY: base.y || 0,
+          toRot: base.rotation || 0,
+          start: now,
+          duration
+        };
+      }
+    }
+    _sampleRemoteLerpState(id, fallback) {
+      var base = fallback || {};
+      var seed = {
+        x: typeof base.x === "number" ? base.x : 0,
+        y: typeof base.y === "number" ? base.y : 0,
+        rotation: typeof base.rotation === "number" ? base.rotation : 0
+      };
+      if (!this.remoteTankLerpStates || !this.remoteTankLerpStates[id]) {
+        return seed;
+      }
+      var lerp = this.remoteTankLerpStates[id];
+      var duration = lerp.duration || 1;
+      if (duration <= 0) {
+        return { x: lerp.toX, y: lerp.toY, rotation: lerp.toRot };
+      }
+      var now = this._nowTimestamp();
+      var t = (now - lerp.start) / duration;
+      if (t >= 1) {
+        return { x: lerp.toX, y: lerp.toY, rotation: lerp.toRot };
+      }
+      if (t <= 0) {
+        t = 0;
+      }
+      return {
+        x: lerp.fromX + (lerp.toX - lerp.fromX) * t,
+        y: lerp.fromY + (lerp.toY - lerp.fromY) * t,
+        rotation: lerp.fromRot + (lerp.toRot - lerp.fromRot) * t
+      };
+    }
+    _nowTimestamp() {
+      try {
+        return performance.now();
+      } catch (_) {
+        return Date.now();
+      }
+    }
     tryAddPowerupAndRepeat() {
       if (this.spectator) {
         return;
       }
-      if (this.powerups.length != this.settings.powerup_limit) {
-        if (this.powerups.length >= this.settings.powerup_limit) {
-          this.powerups.shift();
-        }
-        var powerup = generatePowerup(this);
-        this.placeObject(powerup);
-        this.addPowerup(powerup);
+      if (!this.canSpawnPowerup()) {
+        this.scheduleNextPowerupSpawn();
+        return;
+      }
+      var powerup = this.spawnRandomPowerup();
+      if (powerup) {
         this.message = powerup.getMessage();
       }
-      setTimeout(this.tryAddPowerupAndRepeat.bind(this), this.settings.powerup_interval * 1e3, this);
+      this.scheduleNextPowerupSpawn();
+    }
+    canSpawnPowerup() {
+      if (!this.settings || typeof this.settings.powerup_limit !== "number") {
+        return false;
+      }
+      return this.powerups.length < this.settings.powerup_limit;
+    }
+    spawnRandomPowerup() {
+      var powerup = generatePowerup(this);
+      if (!powerup) {
+        return null;
+      }
+      this.placeObject(powerup);
+      this.addPowerup(powerup);
+      return powerup;
+    }
+    scheduleNextPowerupSpawn() {
+      if (!this.settings) {
+        return;
+      }
+      var interval = Number(this.settings.powerup_interval) * 1e3;
+      if (!(interval >= 0)) {
+        return;
+      }
+      var delay = interval > 0 ? interval : 0;
+      setTimeout(this.tryAddPowerupAndRepeat.bind(this), delay);
     }
     addPowerup(powerup) {
       if (!powerup) {
         return;
       }
-      if (!powerup.id) {
-        powerup.id = "powerup-" + this.nextPowerupId++;
-      }
+      this.assignPowerupId(powerup);
+      this.enforcePowerupLimit();
       this.powerups.push(powerup);
-      if (powerup.registerDelegate) {
-        powerup.registerDelegate(this.broadcastPowerupEvent.bind(this));
+      this.registerPowerupDelegate(powerup);
+      this.announcePowerupSpawn(powerup);
+    }
+    removePowerup(powerup) {
+      if (!powerup) {
+        return;
+      }
+      var index = this.powerups.indexOf(powerup);
+      if (index === -1) {
+        return;
+      }
+      this.powerups.splice(index, 1);
+    }
+    assignPowerupId(powerup) {
+      if (powerup.id) {
+        return;
+      }
+      powerup.id = "powerup-" + this.nextPowerupId++;
+    }
+    enforcePowerupLimit() {
+      if (!this.settings) {
+        return;
+      }
+      var limit = Number(this.settings.powerup_limit);
+      if (!(limit > 0)) {
+        return;
+      }
+      while (this.powerups.length >= limit) {
+        this.removePowerup(this.powerups[0]);
+      }
+    }
+    registerPowerupDelegate(powerup) {
+      if (!powerup || typeof powerup.registerDelegate !== "function") {
+        return;
+      }
+      powerup.registerDelegate(this.broadcastPowerupEvent.bind(this));
+    }
+    announcePowerupSpawn(powerup) {
+      if (!powerup) {
+        return;
       }
       try {
         if (peerManager && peerManager.isHost) {
           var typeName = powerup.constructor && powerup.constructor.name ? powerup.constructor.name : powerup.name || "";
           var sid = powerup.img && powerup.img.id ? powerup.img.id : "";
           var color = (powerup.color || "").replace(/[|]/g, "");
-          var block = [typeName, powerup.id, Math.round(powerup.x) || 0, Math.round(powerup.y) || 0, Math.round(powerup.width) || 0, Math.round(powerup.height) || 0, sid, color].join("|");
-          peerManager.broadcast(["S", block].join(","));
+          var payload = [
+            typeName,
+            powerup.id,
+            Math.round(powerup.x) || 0,
+            Math.round(powerup.y) || 0,
+            Math.round(powerup.width) || 0,
+            Math.round(powerup.height) || 0,
+            sid,
+            color
+          ].join("|");
+          peerManager.broadcast(["S", payload].join(","));
         }
       } catch (_) {
       }
-    }
-    removePowerup(powerup) {
-      this.powerups.splice(this.powerups.indexOf(powerup), 1);
     }
     broadcastPowerupEvent(event) {
       if (!event) {
         return;
       }
-      if (!this.pendingPowerupEvents) {
-        this.pendingPowerupEvents = [];
-      }
-      this.pendingPowerupEvents.push(event);
-      try {
-        if (this.game && this.game.peer_manager && this.game.peer_manager.isHost && typeof this.buildUnifiedDeltaPacket === "function") {
-          var pkt = this.buildUnifiedDeltaPacket();
-          if (pkt && typeof this.game.peer_manager.broadcast === "function") {
-            this.game.peer_manager.broadcast(pkt);
-          }
-        }
-      } catch (_) {
-      }
+      this.enqueuePowerupEvent(event);
+      this.broadcastUnifiedDeltaIfHost();
     }
     consumePendingEvents() {
       var events = this.pendingPowerupEvents || [];
       this.pendingPowerupEvents = [];
       return events;
     }
+    enqueuePowerupEvent(event) {
+      if (!this.pendingPowerupEvents) {
+        this.pendingPowerupEvents = [];
+      }
+      this.pendingPowerupEvents.push(event);
+    }
+    broadcastUnifiedDeltaIfHost() {
+      try {
+        if (!peerManager || !peerManager.isHost || typeof this.buildUnifiedDeltaPacket !== "function") {
+          return;
+        }
+        var packet = this.buildUnifiedDeltaPacket();
+        if (packet) {
+          peerManager.broadcast(packet);
+        }
+      } catch (_) {
+      }
+    }
     applyPowerupEvent(event) {
       if (!event) {
         return;
       }
-      var tankRef = null;
-      if (event.tankId && this.tankById) {
-        tankRef = this.tankById[event.tankId] || null;
-      }
-      if (event.powerup === "TeleportPowerup" && event.tankId) {
-        if (!this.teleportMirrors) {
-          this.teleportMirrors = {};
-        }
-        if (event.status === "activate") {
-          this.teleportMirrors[event.tankId] = true;
-        } else if (event.status === "deactivate") {
-          delete this.teleportMirrors[event.tankId];
-        }
-      }
+      var tank = this.resolveTankById(event.tankId);
+      this.updateTeleportMirrorState(event);
       if (event.tankId) {
-        this.state = this.state || { tanks: {}, powerups: {}, meta: { nextPowerupId: 0 } };
-        var st = this.state.tanks[event.tankId] || (this.state.tanks[event.tankId] = { id: event.tankId, powerups: [] });
-        if (event.status === "activate") {
-          var iconId = this.resolvePowerupSpriteId(event.powerup);
-          st.powerups = iconId ? [{ type: event.powerup, spriteId: iconId }] : [{ type: event.powerup }];
-        } else if (event.status === "deactivate") {
-          st.powerups = [];
-        }
-        if (this.remoteTankMap) {
-          var rt = this.remoteTankMap[event.tankId] || (this.remoteTankMap[event.tankId] = { id: event.tankId });
-          rt.powerups = (st.powerups || []).slice();
-          this.remoteTankMeta = this.collectRemoteTankMeta();
-          this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
-        }
-        if (typeof this.recomputeGlobalPowerups === "function") {
-          this.recomputeGlobalPowerups();
-        }
+        this.updateTankPowerupState(event);
       }
-      var matched = null;
-      if (event.powerupId && this.powerups) {
-        for (var ix = 0; ix < this.powerups.length; ix++) {
-          var pp = this.powerups[ix];
-          if (pp && pp.id === event.powerupId) {
-            matched = pp;
-            break;
-          }
-        }
-      }
-      if (!matched && this.powerups) {
-        for (var i = 0; i < this.powerups.length; i++) {
-          var p = this.powerups[i];
-          if (p && String(p.id) === String(event.powerupId)) {
-            matched = p;
-            break;
-          }
-        }
-      }
+      var powerup = this.findPowerupById(event.powerupId);
       if (event.status === "activate") {
-        if (matched) {
-          if (typeof matched.pickup === "function") {
-            matched.pickup(tankRef || (event.tankId || ""));
-            return;
-          }
-          if (typeof matched.onBulletHit === "function" && tankRef) {
-            matched.onBulletHit(tankRef);
-            return;
-          }
-          if (typeof matched.effect === "function") {
-            matched.effect(tankRef);
-            return;
-          }
-        }
+        this.handlePowerupActivation(event, tank, powerup);
         return;
       }
       if (event.status === "deactivate") {
-        if (tankRef && Array.isArray(tankRef.powerups)) {
-          for (var j = 0; j < tankRef.powerups.length; j++) {
-            var ap = tankRef.powerups[j];
-            var an = ap && ap.constructor && ap.constructor.name ? ap.constructor.name : ap && ap.name;
-            if (an === event.powerup) {
-              if (typeof ap.teardown === "function") {
-                ap.teardown();
-              } else if (typeof ap.undo === "function") {
-                ap.undo(tankRef);
-              }
-            }
-          }
-        }
-        if (matched) {
-          if (typeof matched.teardown === "function") {
-            matched.teardown();
-          } else if (typeof matched.undo === "function") {
-            matched.undo(tankRef);
-          }
-        }
+        this.handlePowerupDeactivation(event, tank, powerup);
+      }
+    }
+    resolveTankById(id) {
+      if (!id || !this.tankById) {
+        return null;
+      }
+      return this.tankById[id] || null;
+    }
+    updateTeleportMirrorState(event) {
+      if (event.powerup !== "TeleportPowerup" || !event.tankId) {
         return;
+      }
+      if (!this.teleportMirrors) {
+        this.teleportMirrors = {};
+      }
+      if (event.status === "activate") {
+        this.teleportMirrors[event.tankId] = true;
+      } else if (event.status === "deactivate") {
+        delete this.teleportMirrors[event.tankId];
+      }
+    }
+    updateTankPowerupState(event) {
+      this.state = this.state || { tanks: {}, powerups: {}, meta: { nextPowerupId: 0 } };
+      var st = this.state.tanks[event.tankId] || (this.state.tanks[event.tankId] = { id: event.tankId, powerups: [] });
+      if (event.status === "activate") {
+        var iconId = this.resolvePowerupSpriteId(event.powerup);
+        st.powerups = iconId ? [{ type: event.powerup, spriteId: iconId }] : [{ type: event.powerup }];
+      } else if (event.status === "deactivate") {
+        st.powerups = [];
+      }
+      if (this.remoteTankMap) {
+        var rt = this.remoteTankMap[event.tankId] || (this.remoteTankMap[event.tankId] = { id: event.tankId });
+        rt.powerups = (st.powerups || []).slice();
+        this.remoteTankMeta = this.collectRemoteTankMeta();
+        this.remoteState = { tanks: this.remoteTankMeta, powerups: this.remotePowerups };
+      }
+      if (typeof this.recomputeGlobalPowerups === "function") {
+        this.recomputeGlobalPowerups();
+      }
+    }
+    findPowerupById(id) {
+      if (!id || !this.powerups) {
+        return null;
+      }
+      for (var i = 0; i < this.powerups.length; i++) {
+        var powerup = this.powerups[i];
+        if (powerup && powerup.id === id) {
+          return powerup;
+        }
+      }
+      for (var j = 0; j < this.powerups.length; j++) {
+        var candidate = this.powerups[j];
+        if (candidate && String(candidate.id) === String(id)) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+    handlePowerupActivation(event, tank, powerup) {
+      if (!powerup) {
+        return;
+      }
+      if (typeof powerup.pickup === "function") {
+        powerup.pickup(tank || (event.tankId || ""));
+        return;
+      }
+      if (typeof powerup.onBulletHit === "function" && tank) {
+        powerup.onBulletHit(tank);
+        return;
+      }
+      if (typeof powerup.effect === "function") {
+        powerup.effect(tank);
+      }
+    }
+    handlePowerupDeactivation(event, tank, powerup) {
+      this.teardownActiveTankPowerups(tank, event.powerup);
+      if (!powerup) {
+        return;
+      }
+      this.teardownPowerupInstance(powerup, tank);
+    }
+    teardownActiveTankPowerups(tank, powerupName) {
+      if (!tank || !Array.isArray(tank.powerups)) {
+        return;
+      }
+      for (var i = 0; i < tank.powerups.length; i++) {
+        var active = tank.powerups[i];
+        var activeName = active && active.constructor && active.constructor.name ? active.constructor.name : active && active.name;
+        if (activeName !== powerupName) {
+          continue;
+        }
+        if (typeof active.teardown === "function") {
+          active.teardown();
+        } else if (typeof active.undo === "function") {
+          active.undo(tank);
+        }
+      }
+    }
+    teardownPowerupInstance(powerup, tank) {
+      if (typeof powerup.teardown === "function") {
+        powerup.teardown();
+      } else if (typeof powerup.undo === "function") {
+        powerup.undo(tank);
       }
     }
     // Map powerup constructor/name to a known sprite element id for guests
@@ -4603,6 +5538,7 @@
       if (/MoveThroughWalls|ghost/i.test(n)) return "ghost";
       if (/Teleport/i.test(n)) return "teleport";
       if (/Cannon(ball)?/i.test(n)) return "cannonball";
+      if (/Dash|Charge/i.test(n)) return "dash";
       if (/Invis/i.test(n)) return "invisible";
       if (/Shinra/i.test(n)) return "repel";
       if (/Hex/i.test(n)) return "hex";
@@ -4614,6 +5550,7 @@
     onclick(x, y) {
     }
   };
+  Object.assign(Maze.prototype, state_helpers_exports);
 
   // js/pregame/constants.js
   var PREGAME_BORDER_WIDTH = 5;
@@ -4797,50 +5734,68 @@
       ctx.stroke();
     }
     handleMovement() {
-      if (!this.tank.maze.doesRectCollide([this.x - this.radius + this.direction[0], this.y - this.radius, this.radius, this.radius])) {
-        this.x += this.direction[0];
-      } else {
-        this.direction[0] *= -1;
-        this.bounces += 1;
-      }
-      if (!this.tank.maze.doesRectCollide([this.x - this.radius, this.y - this.radius + this.direction[1], this.radius, this.radius])) {
-        this.y += this.direction[1];
-      } else {
-        this.direction[1] *= -1;
-        this.bounces += 1;
-      }
+      this.moveAlongAxis(0);
+      this.moveAlongAxis(1);
       if (this.bounces >= this.tank.bounce_limit) {
         this.tank.removeBullet(this);
       }
     }
+    moveAlongAxis(axis) {
+      var delta = this.direction[axis];
+      if (!delta) {
+        return;
+      }
+      var rect = axis === 0 ? [this.x - this.radius + delta, this.y - this.radius, this.radius, this.radius] : [this.x - this.radius, this.y - this.radius + delta, this.radius, this.radius];
+      if (!this.tank.maze.doesRectCollide(rect)) {
+        if (axis === 0) {
+          this.x += delta;
+        } else {
+          this.y += delta;
+        }
+        return;
+      }
+      this.direction[axis] *= -1;
+      this.bounces += 1;
+    }
+    getBoundingRect() {
+      var size = this.radius * 2;
+      return [this.x - this.radius, this.y - this.radius, size, size];
+    }
     handleTankCollisions() {
-      this.tank.maze.tanks.forEach(function(tank) {
-        if (tank == this.tank && this.tank.maze.settings.friendly_fire == false) {
+      var tanks = this.tank.maze.tanks;
+      var bullet_rect = this.getBoundingRect();
+      var friendlyFire = !!(this.tank.maze.settings && this.tank.maze.settings.friendly_fire);
+      for (var i = 0; i < tanks.length; i++) {
+        var tank = tanks[i];
+        if (!tank || tank.is_dead) {
+          continue;
+        }
+        if (tank === this.tank && !friendlyFire) {
+          continue;
+        }
+        if (tank === this.tank && this.tank.maze.tick - this.time_created < 10) {
+          continue;
+        }
+        var tank_rect = [tank.x, tank.y, tank.width, tank.height];
+        if (doRectsOverlap(tank_rect, bullet_rect)) {
+          tank.onBulletHit();
           return;
         }
-        if (tank.is_dead == false) {
-          var bullet_rect = [this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2];
-          var tank_rect = [tank.x, tank.y, tank.width, tank.height];
-          if (doRectsOverlap(tank_rect, bullet_rect)) {
-            if (tank == this.tank && this.tank.maze.tick - this.time_created < 10) {
-              return;
-            }
-            debugger;
-            tank.onBulletHit();
-          }
-        }
-      }.bind(this));
+      }
     }
     handlePowerupCollisions() {
-      this.tank.maze.powerups.forEach(
-        function(powerup) {
-          var bullet_rect = [this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2];
-          var powerup_rect = [powerup.x, powerup.y, powerup.width, powerup.height];
-          if (doRectsOverlap(powerup_rect, bullet_rect)) {
-            powerup.onBulletHit(this.tank);
-          }
-        }.bind(this)
-      );
+      var bullet_rect = this.getBoundingRect();
+      var powerups = this.tank.maze.powerups;
+      for (var i = 0; i < powerups.length; i++) {
+        var powerup = powerups[i];
+        if (!powerup) {
+          continue;
+        }
+        var powerup_rect = [powerup.x, powerup.y, powerup.width, powerup.height];
+        if (doRectsOverlap(powerup_rect, bullet_rect)) {
+          powerup.onBulletHit(this.tank);
+        }
+      }
     }
   };
   var Bullet_default = Bullet;
@@ -4856,6 +5811,12 @@
       x: Math.sin(angle) * magnitude,
       y: -Math.cos(angle) * magnitude
     };
+  }
+  function safeCall(fn) {
+    try {
+      fn();
+    } catch (_) {
+    }
   }
   var Tank = class {
     /**
@@ -4876,8 +5837,11 @@
       const opts = options || {};
       this.disableInput = !!opts.disableInput;
       const sampleSquare = this.maze.squares[0][0];
-      this.width = this.maze.width / this.maze.num_of_columns / 3;
-      this.height = this.maze.height / this.maze.num_of_rows / 3;
+      const baseWidth = this.maze.num_of_columns > 0 ? this.maze.width / this.maze.num_of_columns : this.maze.width;
+      const baseHeight = this.maze.num_of_rows > 0 ? this.maze.height / this.maze.num_of_rows : this.maze.height;
+      const baseSize = Math.min(baseWidth, baseHeight);
+      this.width = baseSize / 3;
+      this.height = baseSize / 3;
       this.rotation = 0;
       this.bullets = [];
       this.bullet_limit = this.maze.settings.bullet_limit;
@@ -4885,27 +5849,27 @@
       this.score = 0;
       this.is_dead = false;
       this.poweruplock = false;
-      this.move_speed = this.maze.settings.move_speed * Math.min(sampleSquare.width, sampleSquare.height) / 60 * 0.8;
+      const cellSize = sampleSquare ? Math.min(sampleSquare.width, sampleSquare.height) : baseSize;
+      this.move_speed = this.maze.settings.move_speed * cellSize / 60 * 0.8;
       this.rotation_speed = this.maze.settings.rotation_speed * 1.2;
-      this.localInput = createInputState();
-      this.networkInput = createInputState();
-      this.activePowerups = [];
-      this.pendingPowerupUpdates = false;
-      this.fireWasActive = false;
-      this.upPressed = false;
-      this.rightPressed = false;
-      this.downPressed = false;
-      this.leftPressed = false;
-      this.shooting = false;
-      this.specialKeyPressed = false;
-      this.hasFiredThisPress = false;
+      this.lastFireTick = null;
       this.special = function() {
       };
       this.rechargeDuration = this.maze && this.maze.settings && typeof this.maze.settings.recharge_duration === "number" ? this.maze.settings.recharge_duration : DEFAULT_RECHARGE_DURATION;
       this.setControls(controls);
+      this.resetInputState();
     }
     setControls(controls) {
       this.controls = Array.isArray(controls) ? controls.slice(0, TANK_ACTIONS.length) : [];
+    }
+    resetInputState() {
+      this.localInput = createInputState();
+      this.networkInput = createInputState();
+      this.shooting = false;
+      this.specialKeyPressed = false;
+      this.poweruplock = false;
+      this.pendingPowerupUpdates = false;
+      this.syncDerivedInput();
     }
     setLocalAction(action, isActive) {
       if (!Object.prototype.hasOwnProperty.call(this.localInput, action)) {
@@ -4917,11 +5881,6 @@
       this.localInput[action] = isActive;
       if (action === "special" && !isActive) {
         this.poweruplock = false;
-      }
-      if (action === "fire") {
-        if (!isActive) {
-          this.hasFiredThisPress = false;
-        }
       }
       this.syncDerivedInput();
     }
@@ -4946,17 +5905,11 @@
       this.pendingPowerupUpdates = true;
     }
     syncDerivedInput() {
-      this.upPressed = this.isActionActive("up");
-      this.rightPressed = this.isActionActive("right");
-      this.downPressed = this.isActionActive("down");
-      this.leftPressed = this.isActionActive("left");
-      this.shooting = this.isActionActive("fire");
-      this.specialKeyPressed = this.isActionActive("special");
-      if (!this.shooting) {
-        this.fireWasActive = false;
-        this.hasFiredThisPress = false;
-      }
-      if (!this.specialKeyPressed) {
+      var firing = this.isActionActive("fire");
+      var specialActive = this.isActionActive("special");
+      this.shooting = firing;
+      this.specialKeyPressed = specialActive;
+      if (!specialActive) {
         this.poweruplock = false;
       }
     }
@@ -4976,16 +5929,14 @@
     }
     main() {
       if (!this.is_dead) {
-        if (this.shouldFire()) {
-          this.fire();
-        }
+        this.tryFire();
         if (this.isActionActive("special")) {
           this.special();
         }
       }
       this.bullets.forEach((bullet) => bullet.main());
       if (!this.is_dead) {
-        this.handleMovement();
+        this.tryMove();
       }
     }
     draw() {
@@ -5030,12 +5981,13 @@
       return { tankId: this.id, powerups: powerupNames };
     }
     shouldFire() {
-      const active = this.isActionActive("fire");
-      if (!active) {
-        this.fireWasActive = false;
+      return this.isActionActive("fire");
+    }
+    tryFire() {
+      if (this.is_dead) {
         return false;
       }
-      if (this.hasFiredThisPress) {
+      if (!this.shouldFire()) {
         return false;
       }
       if (this.bullets.length >= this.bullet_limit) {
@@ -5044,32 +5996,24 @@
       if (this.isWithinRechargeWindow()) {
         return false;
       }
-      this.hasFiredThisPress = true;
-      this.fireWasActive = true;
+      this._fire();
+      const tick = this.maze && typeof this.maze.tick === "number" ? this.maze.tick : 0;
+      this.lastFireTick = tick;
       return true;
     }
     isWithinRechargeWindow() {
-      var recharge = typeof this.rechargeDuration === "number" ? this.rechargeDuration : DEFAULT_RECHARGE_DURATION;
+      const recharge = typeof this.rechargeDuration === "number" ? this.rechargeDuration : DEFAULT_RECHARGE_DURATION;
       if (!recharge || recharge <= 0) {
         return false;
       }
-      if (!Array.isArray(this.bullets) || this.bullets.length === 0) {
+      const tick = this.maze && typeof this.maze.tick === "number" ? this.maze.tick : 0;
+      if (typeof this.lastFireTick !== "number") {
         return false;
       }
-      var tick = this.maze && typeof this.maze.tick === "number" ? this.maze.tick : 0;
-      for (var i = 0; i < this.bullets.length; i++) {
-        var bullet = this.bullets[i];
-        if (!bullet || bullet.time_created == null) {
-          continue;
-        }
-        var age = tick - bullet.time_created;
-        if (age > 0 && age < recharge) {
-          return true;
-        }
-      }
-      return false;
+      const elapsed = tick - this.lastFireTick;
+      return elapsed >= 0 && elapsed < recharge;
     }
-    fire() {
+    _fire() {
       this.fireHelper(this.rotation, this.maze.settings.bullet_speed);
     }
     fireHelper(rotation, speed) {
@@ -5085,7 +6029,14 @@
     fire_helper(rotation, speed) {
       this.fireHelper(rotation, speed);
     }
-    handleMovement() {
+    tryMove() {
+      if (this.is_dead) {
+        return false;
+      }
+      this._move();
+      return true;
+    }
+    _move() {
       if (this.isActionActive("right")) {
         this.rotation += this.rotation_speed;
       }
@@ -5149,21 +6100,6 @@
     loadImage(imgElement) {
       this.img = imgElement;
     }
-    originalMovement() {
-      const ms = this.move_speed;
-      if (this.upPressed) {
-        this.tryMovingTo([this.x, this.y - ms]);
-      }
-      if (this.rightPressed) {
-        this.tryMovingTo([this.x + ms, this.y]);
-      }
-      if (this.downPressed) {
-        this.tryMovingTo([this.x, this.y + ms]);
-      }
-      if (this.leftPressed) {
-        this.tryMovingTo([this.x - ms, this.y]);
-      }
-    }
     onBulletHit() {
       this.destroy();
     }
@@ -5177,44 +6113,73 @@
       this.x = pos[0];
       this.y = pos[1];
       this.bullets = [];
-      this.fireWasActive = false;
-      this.localInput = createInputState();
-      this.networkInput = createInputState();
-      this.syncDerivedInput();
+      this.lastFireTick = null;
+      this.resetInputState();
       this.removeAllPowerups();
     }
     addPowerup(powerup) {
-      this.removeAllPowerups();
-      this.powerups.push(powerup);
-      powerup.effect(this);
-      this.pendingPowerupUpdates = true;
+      if (!powerup) {
+        return;
+      }
+      this.replaceActivePowerups(powerup);
+      safeCall(() => powerup.effect(this));
+      this.markPowerupChange();
+    }
+    _detachPowerup(powerup) {
+      if (!powerup) {
+        return;
+      }
+      this.clearPowerupTimer(powerup);
+      safeCall(() => powerup.undo(this));
+      if (typeof powerup.notifyDeactivate === "function") {
+        safeCall(() => powerup.notifyDeactivate(this));
+      }
+      powerup.tank = null;
     }
     removePowerup(powerup) {
+      if (!powerup) {
+        return;
+      }
       const index = this.powerups.indexOf(powerup);
       if (index === -1) {
         return;
       }
-      try {
-        if (powerup && powerup.timeout) {
-          clearTimeout(powerup.timeout);
-          powerup.timeout = null;
-        }
-      } catch (_) {
-      }
-      powerup.undo(this);
-      if (typeof powerup.notifyDeactivate === "function") {
-        powerup.notifyDeactivate(this);
-      }
+      this._detachPowerup(powerup);
       this.powerups.splice(index, 1);
-      this.pendingPowerupUpdates = true;
+      this.markPowerupChange();
     }
     removeAllPowerups() {
-      this.powerups.slice().forEach((powerup) => {
-        powerup.tank.removePowerup(powerup);
-      });
+      if (this.powerups.length === 0) {
+        return;
+      }
+      var active = this.powerups.slice();
+      for (var i = 0; i < active.length; i++) {
+        this._detachPowerup(active[i]);
+      }
+      this.powerups = [];
+      this.markPowerupChange();
+    }
+    replaceActivePowerups(powerup) {
+      this.removeAllPowerups();
+      if (powerup) {
+        this.powerups.push(powerup);
+      }
+    }
+    clearPowerupTimer(powerup) {
+      if (!powerup || !powerup.timeout) {
+        return;
+      }
+      try {
+        clearTimeout(powerup.timeout);
+      } catch (_) {
+      }
+      powerup.timeout = null;
+    }
+    markPowerupChange() {
+      this.pendingPowerupUpdates = true;
     }
     removeBullet(bullet) {
-      removeElementFromArray2(bullet, this.bullets);
+      removeElementFromArray(bullet, this.bullets);
     }
   };
   var Tank_default = Tank;
@@ -5462,8 +6427,8 @@
     const list = document.createElement("div");
     list.className = "pg-setting-list";
     card.appendChild(list);
-    const buttons = panel.buttons || [];
-    buttons.forEach((btn) => {
+    const settings = typeof panel.getSettingButtons === "function" ? panel.getSettingButtons() : (panel.buttons || []).filter((btn) => btn && btn !== panel.back);
+    settings.forEach((btn) => {
       if (!btn || btn === panel.back) {
         return;
       }
@@ -5473,21 +6438,29 @@
       span.className = "pg-setting__label";
       span.textContent = btn.text || "";
       row.appendChild(span);
-      if ((btn.text || "").toLowerCase().includes("friendly fire")) {
+      if (btn.valueType === "bool") {
         row.classList.add("pg-setting--toggle");
         const input = document.createElement("input");
         input.type = "checkbox";
-        input.checked = (btn.value || "").toString().toLowerCase() === "true";
+        input.checked = !!btn.value;
         input.addEventListener("change", () => {
-          btn.value = input.checked ? "true" : "false";
+          if (typeof btn.setValue === "function") {
+            btn.setValue(input.checked);
+          } else {
+            btn.value = input.checked;
+          }
         });
         row.appendChild(input);
       } else {
         const input = document.createElement("input");
         input.type = "text";
-        input.value = (btn.value || "").toString();
+        input.value = btn.value != null ? btn.value : "";
         input.addEventListener("input", () => {
-          btn.value = input.value;
+          if (typeof btn.setValue === "function") {
+            btn.setValue(input.value);
+          } else {
+            btn.value = input.value;
+          }
         });
         row.appendChild(input);
       }
@@ -5514,6 +6487,8 @@
   }
 
   // js/pregame/StartPanel.js
+  var DEFAULT_CONTROLS = ["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft", "1", "2"];
+  var DEFAULT_COLOUR = "#63C132";
   var StartPanel = class extends Panel_default {
     constructor(colour, pregame) {
       super(colour);
@@ -5528,8 +6503,13 @@
       var add_button = new Button_default(this, 0, 0, "Add Tank");
       add_button.onclick = function() {
         var pregame2 = this.panel.pregame;
-        var current_template = pregame2.tank_panels.length;
-        pregame2.addTankPanel(new TankPanel_default(pregame2, pregame2.colour_templates[current_template], pregame2.controls_templates[current_template]));
+        var index = pregame2.tank_panels.length;
+        var colourTemplates = Array.isArray(pregame2.colour_templates) ? pregame2.colour_templates : [];
+        var controlTemplates = Array.isArray(pregame2.controls_templates) ? pregame2.controls_templates : [];
+        var colour2 = colourTemplates.length ? colourTemplates[index % colourTemplates.length] : DEFAULT_COLOUR;
+        var templateControls = controlTemplates.length ? controlTemplates[index % controlTemplates.length] : DEFAULT_CONTROLS;
+        var controls = Array.isArray(templateControls) ? templateControls.slice() : DEFAULT_CONTROLS.slice();
+        pregame2.addTankPanel(new TankPanel_default(pregame2, colour2, controls));
       };
       add_button.y = canvas.height * 11 / 20;
       add_button.center_horizontally();
@@ -5555,9 +6535,13 @@
       this.addButton(networking_button);
     }
     start() {
-      if (this.pregame && this.pregame.game && this.pregame.game.networking) {
+      var game2 = this.game;
+      if (!game2) {
+        return;
+      }
+      if (game2.networking) {
         try {
-          this.pregame.game.networking.disableOverlay();
+          game2.networking.disableOverlay();
         } catch (_) {
         }
       }
@@ -5565,8 +6549,8 @@
         addChatMessage("* Only the host can start the match.", "notification-message");
         return;
       }
-      var maze = this.game.maze;
-      this.game.main_object = maze;
+      var maze = game2.createMazeInstance();
+      game2.main_object = maze;
       if (typeof maze.beginGameplay === "function") {
         maze.beginGameplay();
       }
@@ -5660,27 +6644,24 @@
 
   // js/pregame/SetSettingsButton.js
   var SetSettingsButton = class extends SetControlsButton_default {
-    constructor(panel, x, y, text, default_value = "", attribute_name) {
+    constructor(panel, x, y, text, default_value = "", attribute_name, valueType = "text") {
       super(panel, x, y, text, default_value);
       this.attribute_name = attribute_name;
-      var g = this.panel.pregame.game;
-      var s = g.maze && g.maze.settings ? g.maze.settings : {};
-      this.value = (attribute_name in s ? s[attribute_name] : "").toString();
+      this.valueType = valueType;
+      var g = this.panel && this.panel.pregame ? this.panel.pregame.game : null;
+      var settingsSource = g && typeof g.getMazeSettings === "function" ? g.getMazeSettings() : null;
+      var fallback = settingsSource && attribute_name in settingsSource ? settingsSource[attribute_name] : default_value;
+      this.value = fallback != null ? fallback : default_value;
     }
-    keyDownHandler(key) {
-      if (key == "Backspace") {
-        this.value = this.value.slice(0, -1);
-        return;
-      }
-      if (key == "Enter") {
-        this.panel.pregame.focus = this.panel.back;
-        return;
-      }
-      this.value += key;
+    setValue(next) {
+      this.value = next;
+    }
+    keyDownHandler() {
     }
     onclick() {
-      this.panel.pregame.focus = this;
-      this.value = "";
+      if (this.panel && this.panel.pregame) {
+        this.panel.pregame.focus = this;
+      }
     }
   };
   var SetSettingsButton_default = SetSettingsButton;
@@ -5691,18 +6672,18 @@
       super("Green");
       this.width = canvas.width;
       this.pregame = pregame;
-      this.settings = [
-        ["Number of Rows", "num_of_rows"],
-        ["Number of Columns", "num_of_columns"],
-        ["Movement Speed", "move_speed"],
-        ["Friendly Fire", "friendly_fire"],
-        ["Number of Bullets", "bullet_limit"],
-        ["Time Between Powerups (s)", "powerup_interval"],
-        ["Max powerups on screen", "powerup_limit"],
-        ["Duration of powerups (s)", "powerup_duration"]
+      this.settingDefinitions = [
+        { label: "Number of Rows", attribute: "num_of_rows", type: "int" },
+        { label: "Number of Columns", attribute: "num_of_columns", type: "int" },
+        { label: "Movement Speed", attribute: "move_speed", type: "number" },
+        { label: "Friendly Fire", attribute: "friendly_fire", type: "bool" },
+        { label: "Number of Bullets", attribute: "bullet_limit", type: "int" },
+        { label: "Time Between Powerups (s)", attribute: "powerup_interval", type: "number" },
+        { label: "Max powerups on screen", attribute: "powerup_limit", type: "int" },
+        { label: "Duration of powerups (s)", attribute: "powerup_duration", type: "number" }
       ];
-      this.settings.forEach(function(ar) {
-        this.make_button(ar);
+      this.settingButtons = this.settingDefinitions.map(function(def) {
+        return this.makeSettingButton(def);
       }.bind(this));
       this.addBackButton();
       var blen = this.buttons.length;
@@ -5733,42 +6714,25 @@
     }
     save() {
       var back_button = this.back;
-      var buttons_that_must_be_posints = [0, 1, 4, 6];
-      var buttons_that_must_be_posnumbers = [2, 5, 7];
-      for (var i = 0; i < buttons_that_must_be_posints.length; i++) {
-        var button = this.buttons[buttons_that_must_be_posints[i]];
-        if (!this.isPosInt(button.value)) {
+      var updates = {};
+      var game2 = this.pregame ? this.pregame.game : null;
+      for (var i = 0; i < this.settingButtons.length; i++) {
+        var button = this.settingButtons[i];
+        var coerced = this.coerceValue(button);
+        if (coerced === null) {
           back_button.text = "x must be positive Integer".replace("x", button.text).replace(":", "");
           return false;
         }
-        var game2 = button.panel.pregame.game;
-        var name = button.attribute_name;
-        var raw = button.value;
-        var intNames = ["num_of_rows", "num_of_columns", "bullet_limit", "powerup_limit", "seconds_between_rounds"];
-        var numNames = ["move_speed", "rotation_speed", "bullet_speed", "powerup_interval", "powerup_duration"];
-        var val = raw;
-        if (intNames.indexOf(name) !== -1) {
-          val = parseInt(raw, 10);
-        }
-        if (numNames.indexOf(name) !== -1) {
-          val = parseFloat(raw);
-        }
-        game2.maze.settings[name] = val;
+        updates[button.attribute_name] = coerced;
       }
-      for (var i = 0; i < buttons_that_must_be_posnumbers.length; i++) {
-        var button = this.buttons[buttons_that_must_be_posnumbers[i]];
-        if (!this.isPosNumber(button.value)) {
-          back_button.text = "x must be positive Integer".replace("x", button.text).replace(":", "");
-          return false;
-        }
-        var numericGame = button.panel.pregame.game;
-        var numericName = button.attribute_name;
-        numericGame.maze.settings[numericName] = parseFloat(button.value);
+      if (game2 && typeof game2.updateMazeSettings === "function") {
+        game2.updateMazeSettings(updates);
       }
-      var friendly_fire_button = this.buttons[3];
-      this.pregame.game.maze.settings.friendly_fire = friendly_fire_button.value == "true" ? true : false;
       back_button.text = "Back";
       return true;
+    }
+    getSettingButtons() {
+      return Array.isArray(this.settingButtons) ? this.settingButtons.slice() : [];
     }
     isPosInt(str) {
       if (isNaN(str)) {
@@ -5790,16 +6754,29 @@
       }
       return true;
     }
-    make_button(ar) {
-      var text = ar[0];
-      var attribute_name = ar[1];
-      this[attribute_name] = new SetSettingsButton_default(this, 0, 0, text, "", attribute_name);
-      if (ar[0] == "Friendly Fire") {
-        this[attribute_name].onclick = function() {
-          this.panel.pregame.focus = this;
-          this.value == "true" ? this.value = "false" : this.value = "true";
-        };
+    makeSettingButton(def) {
+      var btn = new SetSettingsButton_default(this, 0, 0, def.label, "", def.attribute, def.type);
+      this[def.attribute] = btn;
+      return btn;
+    }
+    coerceValue(button) {
+      var raw = button.value;
+      if (button.valueType === "bool") {
+        return !!raw;
       }
+      if (button.valueType === "int") {
+        if (!this.isPosInt(raw)) {
+          return null;
+        }
+        return parseInt(raw, 10);
+      }
+      if (button.valueType === "number") {
+        if (!this.isPosNumber(raw)) {
+          return null;
+        }
+        return parseFloat(raw);
+      }
+      return raw;
     }
   };
   var SettingsPanel_default = SettingsPanel;
@@ -5974,21 +6951,235 @@
     }
   };
 
+  // js/input/ClientInputRelay.js
+  var ACTION_BINDINGS = [
+    { action: "up", payloadKey: "upPressed" },
+    { action: "right", payloadKey: "rightPressed" },
+    { action: "down", payloadKey: "downPressed" },
+    { action: "left", payloadKey: "leftPressed" },
+    { action: "fire", payloadKey: "shooting" },
+    { action: "special", payloadKey: "specialKeyPressed" }
+  ];
+  var ClientInputRelay = class {
+    constructor(peer) {
+      this.peerManager = peer;
+      this.controlMap = {};
+      this.inputState = {};
+      this.bound = false;
+      this.handlers = null;
+    }
+    configure(payload) {
+      this.unregister();
+      this.controlMap = {};
+      this.inputState = {};
+      const peer = this.peerManager;
+      if (!peer || peer.isHost || !peer.id) {
+        return false;
+      }
+      const tanks = payload && Array.isArray(payload.tanks) ? payload.tanks : [];
+      const localCfgs = peer && Array.isArray(peer.localTankConfigs) ? peer.localTankConfigs.slice() : [];
+      const usedCfgIndexes = /* @__PURE__ */ new Set();
+      let hasControlledTank = false;
+      const myId = peer.id;
+      for (let i = 0; i < tanks.length; i++) {
+        const tank = tanks[i];
+        if (!tank || !tank.id) {
+          continue;
+        }
+        let tankOwner = tank.ownerPeerId || null;
+        if (!tankOwner && myId && tank.id.indexOf(myId + "-") === 0) {
+          tankOwner = myId;
+        }
+        if (tankOwner !== myId) {
+          continue;
+        }
+        hasControlledTank = true;
+        this.inputState[tank.id] = this.buildInitialInputState();
+        let controls = Array.isArray(tank.controls) ? tank.controls.slice() : null;
+        if (!controls || controls.length === 0) {
+          controls = deriveControlsFromLocalConfigs(localCfgs, usedCfgIndexes, tank, myId);
+        }
+        controls = Array.isArray(controls) ? controls : [];
+        for (let j = 0; j < controls.length && j < ACTION_BINDINGS.length; j++) {
+          const key = controls[j];
+          if (!key) {
+            continue;
+          }
+          this.controlMap[key] = {
+            tankId: tank.id,
+            action: ACTION_BINDINGS[j].action,
+            payloadKey: ACTION_BINDINGS[j].payloadKey
+          };
+        }
+      }
+      if (hasControlledTank) {
+        this.register();
+      }
+      return hasControlledTank;
+    }
+    register() {
+      if (this.bound) {
+        return;
+      }
+      this.handlers = {
+        keydown: (event) => this.handleKeyDown(event),
+        keyup: (event) => this.handleKeyUp(event)
+      };
+      document.addEventListener("keydown", this.handlers.keydown, true);
+      document.addEventListener("keyup", this.handlers.keyup, true);
+      this.bound = true;
+    }
+    unregister() {
+      if (!this.bound || !this.handlers) {
+        return;
+      }
+      document.removeEventListener("keydown", this.handlers.keydown, true);
+      document.removeEventListener("keyup", this.handlers.keyup, true);
+      this.handlers = null;
+      this.bound = false;
+    }
+    handleKeyDown(event) {
+      const peer = this.peerManager;
+      if (!peer || peer.isHost) {
+        return;
+      }
+      if (isTypingInEditable()) {
+        return;
+      }
+      const mapping = this.controlMap[event.key];
+      if (!mapping) {
+        return;
+      }
+      const state = this.inputState[mapping.tankId];
+      if (!state) {
+        return;
+      }
+      const changed = this.setInputStateFlag(state, mapping.payloadKey, true);
+      if (changed) {
+        this.queueInputSend(mapping.tankId);
+      }
+      if (event.key.indexOf("Arrow") === 0) {
+        event.preventDefault();
+      }
+    }
+    handleKeyUp(event) {
+      const peer = this.peerManager;
+      if (!peer || peer.isHost) {
+        return;
+      }
+      if (isTypingInEditable()) {
+        return;
+      }
+      const mapping = this.controlMap[event.key];
+      if (!mapping) {
+        return;
+      }
+      const state = this.inputState[mapping.tankId];
+      if (!state) {
+        return;
+      }
+      const changed = this.setInputStateFlag(state, mapping.payloadKey, false);
+      if (changed) {
+        this.queueInputSend(mapping.tankId);
+      }
+    }
+    buildInitialInputState() {
+      return {
+        upPressed: false,
+        rightPressed: false,
+        downPressed: false,
+        leftPressed: false,
+        shooting: false,
+        specialKeyPressed: false
+      };
+    }
+    setInputStateFlag(state, key, value) {
+      if (state[key] === value) {
+        return false;
+      }
+      state[key] = value;
+      return true;
+    }
+    queueInputSend(tankId) {
+      const peer = this.peerManager;
+      if (!peer || typeof peer.sendInputState !== "function") {
+        return;
+      }
+      const state = this.inputState[tankId];
+      if (!state) {
+        return;
+      }
+      peer.sendInputState({
+        tankId,
+        upPressed: !!state.upPressed,
+        downPressed: !!state.downPressed,
+        leftPressed: !!state.leftPressed,
+        rightPressed: !!state.rightPressed,
+        shooting: !!state.shooting,
+        specialKeyPressed: !!state.specialKeyPressed
+      });
+    }
+  };
+  function deriveControlsFromLocalConfigs(localCfgs, usedCfgIndexes, tank, myId) {
+    if (!Array.isArray(localCfgs) || !tank || !tank.id) {
+      return [];
+    }
+    const suffix = tank.id.substring((myId + "-").length);
+    let matchIndex = -1;
+    for (let ci = 0; ci < localCfgs.length; ci++) {
+      if (usedCfgIndexes.has(ci)) {
+        continue;
+      }
+      const cfg = localCfgs[ci];
+      if (cfg && cfg.panelId && suffix && cfg.panelId === suffix) {
+        matchIndex = ci;
+        break;
+      }
+    }
+    if (matchIndex === -1) {
+      for (let cj = 0; cj < localCfgs.length; cj++) {
+        if (!usedCfgIndexes.has(cj)) {
+          matchIndex = cj;
+          break;
+        }
+      }
+    }
+    if (matchIndex >= 0) {
+      usedCfgIndexes.add(matchIndex);
+      const cfg = localCfgs[matchIndex];
+      if (cfg && Array.isArray(cfg.controls)) {
+        return cfg.controls.slice();
+      }
+    }
+    return [];
+  }
+  function isTypingInEditable() {
+    try {
+      const el = document && document.activeElement ? document.activeElement : null;
+      if (!el) {
+        return false;
+      }
+      const tag = (el.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") {
+        return true;
+      }
+      if (el.isContentEditable) {
+        return true;
+      }
+    } catch (_) {
+    }
+    return false;
+  }
+
   // js/Game.js
   var Game = class {
     constructor() {
-      this.maze = new Maze(this);
-      try {
-        window.__mazeRef = this.maze;
-      } catch (_) {
-      }
+      this.maze = null;
+      this.mazeSettings = Object.assign({}, MAZE_DEFAULT_SETTINGS);
       this.pregame = new Pregame(this, canvas.height * 3 / 4);
       this.networking = new NetworkingScreen(this);
       this.main_object = this.pregame;
-      this.clientControlMap = {};
-      this.clientInputState = {};
-      this.clientInputHandlers = null;
-      this.clientInputBound = false;
+      this.clientInputRelay = new ClientInputRelay(peerManager);
       try {
         setHudScoreboardVisible(false);
       } catch (_) {
@@ -5997,6 +7188,32 @@
         ensureHudScoreboardHandlers();
       } catch (_) {
       }
+    }
+    getMazeSettings() {
+      return this.maze ? this.maze.settings : this.mazeSettings;
+    }
+    updateMazeSettings(partial) {
+      if (!partial) {
+        return;
+      }
+      this.mazeSettings = Object.assign({}, this.mazeSettings, partial);
+      if (this.maze && this.maze.settings) {
+        Object.assign(this.maze.settings, partial);
+      }
+    }
+    createMazeInstance(overrides) {
+      const mergedSettings = Object.assign({}, this.mazeSettings, overrides || {});
+      const maze = new Maze(this, mergedSettings);
+      this.maze = maze;
+      this.mazeSettings = Object.assign({}, maze.settings);
+      try {
+        window.__mazeRef = maze;
+      } catch (_) {
+      }
+      return maze;
+    }
+    ensureMaze(overrides) {
+      return this.maze || this.createMazeInstance(overrides);
     }
     main() {
       this.main_object.main();
@@ -6018,24 +7235,25 @@
       if (this.networking) {
         this.networking.hideOverlay();
       }
-      if (this.maze && typeof this.maze.applyInitString === "function") {
-        this.maze.applyInitString(str);
+      const maze = this.ensureMaze();
+      if (maze && typeof maze.applyInitString === "function") {
+        maze.applyInitString(str);
       }
       try {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       } catch (e) {
       }
-      this.maze.spectator = true;
-      this.main_object = this.maze;
-      this.maze.beginGameplay && this.maze.beginGameplay();
+      maze.spectator = true;
+      this.main_object = maze;
+      maze.beginGameplay && maze.beginGameplay();
       try {
         setHudScoreboardVisible(true);
         layoutHudOverCanvas();
         setPregameOverlayVisible(false);
       } catch (_) {
       }
-      this.setupClientControllers({ tanks: this.maze.remoteTankMeta });
+      this.setupClientControllers({ tanks: maze.remoteTankMeta });
     }
     // Compact protocol: delta string from host
     updateStateFromHostCompact(str) {
@@ -6045,201 +7263,12 @@
       this.maze.applyDeltaString(str);
     }
     setupClientControllers(payload) {
-      this.unregisterClientInputRelay();
-      this.clientControlMap = {};
-      this.clientInputState = {};
-      var peer = peerManager;
-      if (!peer || peer.isHost || !peer.id) {
-        this.clientInputBound = false;
-        return;
+      if (!this.clientInputRelay) {
+        this.clientInputRelay = new ClientInputRelay(peerManager);
       }
-      var myId = peer.id;
-      var tanks = payload && payload.tanks ? payload.tanks : [];
-      var actionBindings = [
-        { action: "up", payloadKey: "upPressed" },
-        { action: "right", payloadKey: "rightPressed" },
-        { action: "down", payloadKey: "downPressed" },
-        { action: "left", payloadKey: "leftPressed" },
-        { action: "fire", payloadKey: "shooting" },
-        { action: "special", payloadKey: "specialKeyPressed" }
-      ];
-      var hasControlledTank = false;
-      var localCfgs = peer && peer.localTankConfigs ? peer.localTankConfigs.slice() : [];
-      var usedCfgIndexes = /* @__PURE__ */ new Set();
-      for (var i = 0; i < tanks.length; i++) {
-        var tank = tanks[i];
-        var tankOwner = tank && tank.ownerPeerId ? tank.ownerPeerId : null;
-        if (!tankOwner && tank && tank.id && myId && tank.id.indexOf(myId + "-") === 0) {
-          tankOwner = myId;
-        }
-        if (tankOwner !== myId) {
-          continue;
-        }
-        hasControlledTank = true;
-        this.clientInputState[tank.id] = {
-          upPressed: false,
-          rightPressed: false,
-          downPressed: false,
-          leftPressed: false,
-          shooting: false,
-          specialKeyPressed: false
-        };
-        var controls = Array.isArray(tank.controls) ? tank.controls.slice() : null;
-        if (!controls || controls.length === 0) {
-          var suffix = tank && tank.id ? tank.id.substring((myId + "-").length) : "";
-          var matchIndex = -1;
-          for (var ci = 0; ci < localCfgs.length; ci++) {
-            var cfg = localCfgs[ci];
-            if (usedCfgIndexes.has(ci)) {
-              continue;
-            }
-            if (cfg && cfg.panelId && suffix && cfg.panelId === suffix) {
-              matchIndex = ci;
-              break;
-            }
-          }
-          if (matchIndex === -1) {
-            for (var cj = 0; cj < localCfgs.length; cj++) {
-              if (!usedCfgIndexes.has(cj)) {
-                matchIndex = cj;
-                break;
-              }
-            }
-          }
-          if (matchIndex >= 0 && localCfgs[matchIndex] && Array.isArray(localCfgs[matchIndex].controls)) {
-            controls = localCfgs[matchIndex].controls.slice();
-            usedCfgIndexes.add(matchIndex);
-          }
-        }
-        controls = Array.isArray(controls) ? controls : [];
-        for (var j = 0; j < controls.length && j < actionBindings.length; j++) {
-          var key = controls[j];
-          if (!key) {
-            continue;
-          }
-          this.clientControlMap[key] = {
-            tankId: tank.id,
-            action: actionBindings[j].action,
-            payloadKey: actionBindings[j].payloadKey
-          };
-        }
-      }
-      if (hasControlledTank) {
-        this.registerClientInputRelay();
-      } else {
-        this.clientInputBound = false;
-      }
-    }
-    registerClientInputRelay() {
-      if (this.clientInputBound) {
-        return;
-      }
-      this.clientInputHandlers = {
-        keydown: this.handleClientKeyDown.bind(this),
-        keyup: this.handleClientKeyUp.bind(this)
-      };
-      document.addEventListener("keydown", this.clientInputHandlers.keydown, true);
-      document.addEventListener("keyup", this.clientInputHandlers.keyup, true);
-      this.clientInputBound = true;
-    }
-    unregisterClientInputRelay() {
-      if (!this.clientInputBound || !this.clientInputHandlers) {
-        return;
-      }
-      document.removeEventListener("keydown", this.clientInputHandlers.keydown, true);
-      document.removeEventListener("keyup", this.clientInputHandlers.keyup, true);
-      this.clientInputHandlers = null;
-      this.clientInputBound = false;
-    }
-    handleClientKeyDown(event) {
-      var peer = peerManager;
-      if (!peer || peer.isHost) {
-        return;
-      }
-      if (isTypingInEditable()) {
-        return;
-      }
-      var mapping = this.clientControlMap[event.key];
-      if (!mapping) {
-        return;
-      }
-      var state = this.clientInputState[mapping.tankId];
-      if (!state) {
-        return;
-      }
-      var changed = this.setInputStateFlag(state, mapping.payloadKey, true);
-      if (changed) {
-        this.queueInputSend(mapping.tankId);
-      }
-      if (event.key.indexOf("Arrow") === 0) {
-        event.preventDefault();
-      }
-    }
-    handleClientKeyUp(event) {
-      var peer = peerManager;
-      if (!peer || peer.isHost) {
-        return;
-      }
-      if (isTypingInEditable()) {
-        return;
-      }
-      var mapping = this.clientControlMap[event.key];
-      if (!mapping) {
-        return;
-      }
-      var state = this.clientInputState[mapping.tankId];
-      if (!state) {
-        return;
-      }
-      var changed = this.setInputStateFlag(state, mapping.payloadKey, false);
-      if (changed) {
-        this.queueInputSend(mapping.tankId);
-      }
-    }
-    setInputStateFlag(state, key, value) {
-      if (state[key] === value) {
-        return false;
-      }
-      state[key] = value;
-      return true;
-    }
-    queueInputSend(tankId) {
-      var peer = peerManager;
-      if (!peer || !peer.sendInputState) {
-        return;
-      }
-      var state = this.clientInputState[tankId];
-      if (!state) {
-        return;
-      }
-      peer.sendInputState({
-        tankId,
-        upPressed: !!state.upPressed,
-        downPressed: !!state.downPressed,
-        leftPressed: !!state.leftPressed,
-        rightPressed: !!state.rightPressed,
-        shooting: !!state.shooting,
-        specialKeyPressed: !!state.specialKeyPressed
-      });
+      this.clientInputRelay.configure(payload);
     }
   };
-  function isTypingInEditable() {
-    try {
-      var el = document && document.activeElement ? document.activeElement : null;
-      if (!el) {
-        return false;
-      }
-      var tag = (el.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea") {
-        return true;
-      }
-      if (el.isContentEditable) {
-        return true;
-      }
-    } catch (_) {
-    }
-    return false;
-  }
 
   // js/main.js
   var game = new Game();

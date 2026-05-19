@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Flight Simulator</title>
+    <link rel="stylesheet" href="css/item-slots.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div id="info">
+        <div id="info-text">Arrow/WASD: Steer | Space: Boost | Tab: Toggle Stats</div>
+        <div id="inventory-bar">
+            <button id="inventory-add" title="Add random item">+</button>
+            <div id="inventory-slots"></div>
+        </div>
+    </div>
+    <div id="right-hud-container">
+        <div id="version-indicator" class="right-hud-panel"></div>
+        <div id="building-counter" class="right-hud-panel"></div>
+        <div id="hud-stats" class="right-hud-panel">
+            <h3>Pilot Stats</h3>
+            <ul>
+                <li><span class="label">Current Speed</span><span class="value" id="stat-speed">-</span></li>
+                <li><span class="label">Hitbox Size</span><span class="value" id="stat-size">-</span></li>
+                <li><span class="label">Rotation Speed</span><span class="value" id="stat-rotation">-</span></li>
+                <li><span class="label">Max Speed</span><span class="value" id="stat-max-speed">-</span></li>
+                <li><span class="label">Acceleration</span><span class="value" id="stat-acceleration">-</span></li>
+            </ul>
+        </div>
+    </div>
+    <div id="hud">
+        <div id="stars">
+            <span id="star-count">0</span>
+            <span id="star-icons">&#9733;</span>
+        </div>
+        <div id="health">
+            <div id="health-fill"></div>
+            <span id="health-text">100</span>
+        </div>
+    </div>
+
+    <div id="minimap"></div>
+
+    <div id="shield-overlay"></div>
+
+    <div id="pause-menu-root" hidden></div>
+
+    <!-- Import Three.js library -->
+    <!-- Uses a CDN for simplicity in a single file. You could download and embed if needed. -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import { Game } from './src/Game.js';
+        import { UIManager } from './src/UIManager.js';
+        import { GAME_VERSION } from './src/version.js';
+        import { ItemFactory } from './src/items/ItemFactory.js';
+        import { PauseMenu } from './src/pause-menu.js';
+
+        const gameContainer = document.body;
+        const itemFactory = new ItemFactory();
+        new UIManager(itemFactory);
+        new PauseMenu();
+        const game = new Game(gameContainer, itemFactory);
+
+        const versionElement = document.getElementById('version-indicator');
+        if (versionElement) {
+            versionElement.textContent = `v${GAME_VERSION}`;
+        }
+
+        window.addEventListener('beforeunload', () => {
+            game.dispose();
+        });
+    </script>
+</body>
+
+</html>

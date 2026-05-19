@@ -1,0 +1,41 @@
+# Build outputs
+dist/
+
+# Dependencies
+node_modules/
+
+# Development source and tooling (keep publish bundle only)
+css/
+js/
+!js/
+js/*
+!js/bundle.js
+tests/
+package.json
+package-lock.json
+
+# Environment / secrets
+codexKey.txt
+
+# Local artifacts and notes
+build command.txt
+ui-refactor.txt
+design.md
+design.txt
+refactor.txt
+README.md
+TODO.md
+suggestions.Txt
+
+# Legacy or archived content
+old game/
+chess/
+togoto github/
+text/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+~$*
