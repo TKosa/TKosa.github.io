@@ -1,0 +1,11 @@
+# Local AI/tooling and scratch files
+.gemini/
+GEMINI.md
+agents.md
+apply_patch.ps1
+tmp_patch.diff
+temp_method.txt
+
+# Local editor/system noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Tests</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #222;
+            color: #eee;
+            padding: 20px;
+        }
+
+        .suite-header {
+            font-weight: bold;
+            margin-top: 1em;
+            color: #8af;
+            font-size: 1.2em;
+        }
+
+        .pass {
+            color: #8f8;
+        }
+
+        .fail {
+            color: #f88;
+        }
+
+        h1 {
+            color: #fff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Test Runner</h1>
+    <div id="output"></div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import { run } from './test-framework.js';
+        import './inventory.test.js';
+        import './bullet_homing.test.js';
+        import './enemy_damage.test.js';
+
+        window.onerror = function (message, source, lineno, colno, error) {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = 'fail';
+            div.textContent = `Global Error: ${message} at ${source}:${lineno}`;
+            output.appendChild(div);
+            console.error(error);
+        };
+
+        run().catch(e => {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = 'fail';
+            div.textContent = `Runner Error: ${e.message}`;
+            output.appendChild(div);
+            console.error(e);
+        });
+    </script>
+</body>
+
+</html>

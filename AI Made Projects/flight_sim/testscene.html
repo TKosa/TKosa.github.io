@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turret Test Scene</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="info">
+        Turret Test Scene<br>
+        Arrow Keys / WASD: Move Camera<br>
+        Space/Shift: Move Up/Down<br>
+        Mouse: Look Around<br>
+        <br>
+        <strong>Turret Rotation:</strong><br>
+        T/G: X Rotation<br>
+        Y/H: Y Rotation<br>
+        U/J: Z Rotation<br>
+        <br>
+        <span id="rotation-display">Waiting for turret...</span><br>
+        <span id="position-display"></span>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { Turret } from './src/items/Turret.js';
+        import { TurretPoolManager } from './src/TurretPoolManager.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x87CEEB, 100, 500);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x87CEEB);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xaaaaaa);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(50, 100, 75);
+        scene.add(directionalLight);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(200, 200);
+        const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x55aa55 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Building
+        const buildingWidth = 15;
+        const buildingHeight = 30;
+        const buildingDepth = 15;
+        const buildingGeometry = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+        const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0x808080 });
+        const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+        building.position.set(0, buildingHeight / 2, 0);
+        scene.add(building);
+
+        // Grid helper
+        const gridHelper = new THREE.GridHelper(200, 20);
+        scene.add(gridHelper);
+
+        // Clock
+        const clock = new THREE.Clock();
+
+        // Initialize turret pool
+        console.log('Initializing turret pool...');
+        const turretPool = new TurretPoolManager(scene);
+        Turret.initialize(turretPool);
+
+        // Create turret after pool is ready
+        let turret = null;
+        let turretModel = null;
+
+        turretPool.onReady(() => {
+            console.log('Turret pool ready!');
+            const turretPosition = new THREE.Vector3(0, buildingHeight + 1.5, 0);
+            turret = new Turret(scene, turretPosition, clock);
+
+            if (turret.poolIndex !== null) {
+                turretModel = turretPool.getInstance(turret.poolIndex);
+                console.log('Turret created!');
+                console.log('  Pool index:', turret.poolIndex);
+                console.log('  Position:', turretModel.position);
+                console.log('  Rotation:', turretModel.rotation);
+                console.log('  Scale:', turretModel.scale);
+            } else {
+                console.error('Failed to acquire turret from pool!');
+            }
+        });
+
+        // Position camera
+        camera.position.set(0, 20, 50);
+        camera.lookAt(0, buildingHeight / 2, 0);
+
+        // Controls
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        let mouseX = 0, mouseY = 0;
+        document.addEventListener('mousemove', (e) => {
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        const rotationDisplay = document.getElementById('rotation-display');
+        const positionDisplay = document.getElementById('position-display');
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Camera movement
+            const moveSpeed = 0.5;
+            if (keys['KeyW'] || keys['ArrowUp']) camera.position.z -= moveSpeed;
+            if (keys['KeyS'] || keys['ArrowDown']) camera.position.z += moveSpeed;
+            if (keys['KeyA'] || keys['ArrowLeft']) camera.position.x -= moveSpeed;
+            if (keys['KeyD'] || keys['ArrowRight']) camera.position.x += moveSpeed;
+            if (keys['Space']) camera.position.y += moveSpeed;
+            if (keys['ShiftLeft']) camera.position.y -= moveSpeed;
+
+            // Turret rotation controls
+            if (turretModel) {
+                const rotSpeed = 0.02;
+
+                if (keys['KeyT']) turretModel.rotation.x += rotSpeed;
+                if (keys['KeyG']) turretModel.rotation.x -= rotSpeed;
+                if (keys['KeyY']) turretModel.rotation.y += rotSpeed;
+                if (keys['KeyH']) turretModel.rotation.y -= rotSpeed;
+                if (keys['KeyU']) turretModel.rotation.z += rotSpeed;
+                if (keys['KeyJ']) turretModel.rotation.z -= rotSpeed;
+
+                rotationDisplay.textContent = `Rotation - X: ${turretModel.rotation.x.toFixed(2)}, Y: ${turretModel.rotation.y.toFixed(2)}, Z: ${turretModel.rotation.z.toFixed(2)}`;
+                positionDisplay.textContent = `Position - X: ${turretModel.position.x.toFixed(1)}, Y: ${turretModel.position.y.toFixed(1)}, Z: ${turretModel.position.z.toFixed(1)}`;
+            }
+
+            // Mouse look
+            camera.rotation.y = -mouseX * 0.5;
+            camera.rotation.x = mouseY * 0.3;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+        clock.start();
+    </script>
+</body>
+
+</html>
