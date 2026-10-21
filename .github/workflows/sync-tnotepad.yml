@@ -24,14 +24,20 @@ jobs:
         with:
           path: source
 
-      # Loaded by hand rather than through actions/checkout so that a key pasted
-      # with Windows line endings or without a final newline still works.
+      # Loaded by hand rather than through actions/checkout, rebuilding the line
+      # breaks, so a key pasted with Windows line endings, spaces or no line
+      # breaks at all still works.
       - name: Load the deploy key
         env:
           DEPLOY_KEY: ${{ secrets.TNOTEPAD_COM_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/tnotepad_com
+          body=$(printf '%s' "$DEPLOY_KEY" | tr -d ' \t\r\n' | sed -e 's/-----BEGINOPENSSHPRIVATEKEY-----//' -e 's/-----ENDOPENSSHPRIVATEKEY-----//')
+          {
+            echo '-----BEGIN OPENSSH PRIVATE KEY-----'
+            printf '%s\n' "$body" | fold -w 70
+            echo '-----END OPENSSH PRIVATE KEY-----'
+          } > ~/.ssh/tnotepad_com
           chmod 600 ~/.ssh/tnotepad_com
           if ! ssh-keygen -y -f ~/.ssh/tnotepad_com > /dev/null; then
             echo "::error::TNOTEPAD_COM_DEPLOY_KEY is not a valid private key. Paste the whole private key file (it starts with -----BEGIN OPENSSH PRIVATE KEY-----)."
