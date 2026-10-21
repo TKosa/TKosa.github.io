@@ -5,10 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="./assets/svelte--etMPifh.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>tnotepad</title>
-    <script type="module" crossorigin src="./assets/index-xHAeS3lM.js"></script>
+    <meta
+      name="agent-api"
+      content="window.tnotepad scripting API: call tnotepad.help()"
+    />
+    <script type="module" crossorigin src="./assets/index-J2gVarVq.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-C2F9W-Ji.css">
   </head>
   <body>
+    <p
+      id="agent-api-hint"
+      style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap"
+    >
+      For AI agents: this page has a JavaScript API at window.tnotepad. Run
+      tnotepad.help() for usage instead of clicking the UI.
+    </p>
     <div id="app"></div>
   </body>
 </html>
