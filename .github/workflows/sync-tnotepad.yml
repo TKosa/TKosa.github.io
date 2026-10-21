@@ -1,0 +1,52 @@
+# Copies the deployed T Notepad build (tnotepad/) to the TKosa/tnotepad.com
+# repo, which GitHub Pages serves at https://tnotepad.com. Runs whenever a
+# push changes tnotepad/, which is what `npm run deploy` in tnotepad-svelte does.
+# Needs the secret TNOTEPAD_COM_DEPLOY_KEY: the private half of a deploy key
+# with write access on TKosa/tnotepad.com.
+name: Sync T Notepad to tnotepad.com
+
+on:
+  push:
+    branches: [master]
+    paths: ['tnotepad/**']
+  workflow_dispatch:
+
+concurrency:
+  group: sync-tnotepad
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this site
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Check out tnotepad.com
+        uses: actions/checkout@v4
+        with:
+          repository: TKosa/tnotepad.com
+          ssh-key: ${{ secrets.TNOTEPAD_COM_DEPLOY_KEY }}
+          path: site
+
+      - name: Replace the site with the current build
+        run: |
+          find site -mindepth 1 -maxdepth 1 ! -name .git ! -name README.md -exec rm -rf {} +
+          cp -r source/tnotepad/. site/
+          echo tnotepad.com > site/CNAME
+          touch site/.nojekyll
+
+      - name: Commit and push
+        working-directory: site
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "tnotepad.com is already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync from TKosa.github.io ${GITHUB_SHA::7}"
+          git push
